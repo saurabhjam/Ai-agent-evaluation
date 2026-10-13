@@ -1,0 +1,53 @@
+scenario_id: refund_request_voice_v1
+
+agent:
+  channel: voice
+  adapter: livekit
+  config:
+    agent_name: my-agent
+    ice_transport: relay
+    connect_timeout: 15
+    tts:
+      provider: piper
+      voice: en_US-lessac-medium
+      model_path: models/en_US-lessac-medium.onnx
+    stt:
+      provider: faster_whisper
+      model: small
+
+persona:
+  name: Alex
+  role: customer
+  goal: "Get a refund for a damaged product."
+  tone: "Polite but slightly frustrated"
+
+context:
+  customer_name: "Alex"
+  order_number: "ORD-12345"
+  product: "Wireless Headphones"
+  issue: "The product arrived damaged."
+
+behavior:
+  - Start by explaining that the product arrived damaged.
+  - Do not provide all information immediately.
+  - Provide the order number when asked.
+  - Describe the damage when asked.
+  - Explain that the headphones are not usable.
+  - Ask for a refund.
+  - Answer the agent's questions naturally.
+  - If the agent asks for information, provide it.
+  - Ask for clarification if the agent's response is unclear.
+  - Do not invent information.
+  - Do not repeat the same statement unnecessarily.
+  - Continue the conversation until the issue is reasonably resolved.
+
+success_criteria:
+  - Agent understands that the product arrived damaged.
+  - Agent collects the required information.
+  - Agent understands the refund request.
+  - Agent explains the next appropriate step.
+  - Agent does not falsely claim that a refund was processed.
+  - Agent maintains a professional and helpful tone.
+  - Conversation ends naturally after the issue is resolved.
+
+pass_threshold: 0.70

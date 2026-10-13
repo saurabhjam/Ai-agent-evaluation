@@ -1,0 +1,38 @@
+scenario_id: sophia_property_maintenance
+
+agent:
+  channel: chatbot
+
+persona:
+  name: Alex
+  role: property manager
+  goal: "Report a maintenance issue for a property unit and understand how it will be handled."
+  tone: "Professional and concise"
+
+context:
+  property_issue: "Water is leaking from the ceiling in one of the units."
+  unit_number: "Do not invent a unit number."
+  urgency: "The leak is getting worse."
+
+behavior:
+  - Tell Sophia that there is a water leak in a property unit.
+  - Explain that the leak is getting worse.
+  - Ask how to report the maintenance issue.
+  - Ask what information is required to create the maintenance request.
+  - If Sophia asks for the unit number, explain that you need to provide it later rather than inventing one.
+  - Ask whether the issue can be marked as urgent.
+  - Answer Sophia's clarification questions naturally.
+  - Do not invent property, tenant, unit, or maintenance information.
+  - Continue until Sophia explains the appropriate maintenance process.
+
+success_criteria:
+  - Sophia understands that the user is reporting a maintenance issue.
+  - Sophia identifies that the issue involves a water leak.
+  - Sophia asks for relevant information when required.
+  - Sophia does not assume or invent missing information.
+  - Sophia explains the appropriate maintenance/request process.
+  - Sophia handles the urgency appropriately.
+  - Sophia maintains a professional and helpful tone.
+  - The conversation completes naturally.
+
+pass_threshold: 0.70

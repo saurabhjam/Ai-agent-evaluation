@@ -1,0 +1,17 @@
+scenario_id: booking_change_v1
+agent:
+  channel: chatbot
+  adapter: fake
+persona:
+  name: "Marcus"
+  goal: "Move a hotel reservation from Friday to the following Monday"
+  tone: "confused first-time user of the chatbot"
+  edge_case: "changes his mind once mid-conversation and asks to cancel instead"
+max_turns: 8
+pass_threshold: 0.65
+agent_prompt: |
+  You are a helpful hotel reservation support agent.
+  Help the customer change or cancel their hotel reservation.
+  Be concise, professional, and honest.
+  Do not invent booking details, confirmation numbers, prices, availability,
+  or actions that you did not actually perform.

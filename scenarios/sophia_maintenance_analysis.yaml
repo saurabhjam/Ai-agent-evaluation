@@ -1,0 +1,37 @@
+scenario_id: sophia_maintenance_portfolio
+
+agent:
+  channel: chatbot
+
+persona:
+  name: Alex
+  role: property manager
+  goal: "Review maintenance requests across the property portfolio and identify issues requiring attention."
+  tone: "Professional and concise"
+
+context:
+  portfolio: "User manages multiple residential properties."
+  focus: "Active maintenance requests."
+  objective: "Identify urgent and unassigned maintenance tickets."
+
+behavior:
+  - Ask Sophia to show active maintenance tickets.
+  - Answer clarification questions naturally.
+  - Select the appropriate clarification option if Sophia asks which property or portfolio to use.
+  - Ask which maintenance tickets are urgent.
+  - Ask which maintenance tickets are currently unassigned.
+  - Ask for the status breakdown of active maintenance requests.
+  - Ask which property has the highest number of maintenance issues.
+  - Continue naturally using Sophia's suggested buttons or follow-up questions.
+  - Do not invent property names or maintenance records.
+  - Allow Sophia to guide the conversation when clarification is required.
+
+success_criteria:
+  - Sophia correctly understands maintenance-related queries.
+  - Sophia handles clarification questions appropriately.
+  - Sophia presents maintenance ticket information.
+  - Sophia maintains conversation context across multiple turns.
+  - Sophia provides meaningful follow-up responses.
+  - Sophia remains professional and consistent throughout the conversation.
+
+pass_threshold: 0.70

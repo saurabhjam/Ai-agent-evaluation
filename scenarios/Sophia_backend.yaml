@@ -1,0 +1,54 @@
+scenario_id: sophia_portfolio_summary
+
+agent:
+  channel: chatbot
+
+persona:
+  name: Alex
+  role: property manager
+  goal: Review portfolio performance and identify issues requiring attention.
+  tone: Professional and concise
+
+context:
+  portfolio: Accessible residential property portfolio.
+  focus: Portfolio KPIs, occupancy and actionable issues.
+  objective: Review portfolio performance and identify issues requiring attention.
+
+behavior:
+  - Ask Sophia for an executive portfolio summary.
+  - Answer clarification questions naturally.
+  - Ask how many units are vacant.
+  - Ask for the occupancy rate.
+  - Ask which properties require attention.
+  - Use available clarification options or suggested buttons when supported.
+  - Do not invent property names, people, records, or values.
+  - Allow Sophia to guide the conversation when clarification is required.
+
+success_criteria:
+  - Sophia provides a useful portfolio summary within the selected scope.
+  - Reported figures are consistent across follow-ups.
+  - Sophia does not invent unsupported portfolio records.
+
+pass_threshold: 0.7
+
+backend_validation:
+
+  - name: Verify Portfolio Summary
+
+    backend: sophia-rest
+
+    type: rest
+
+    request:
+      method: GET
+      url: /api/portfolio/summary
+
+    expect:
+      $.occupancy_rate:
+        exists: true
+
+      $.vacant_units:
+        exists: true
+
+      $.properties_requiring_attention:
+        exists: true

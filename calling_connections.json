@@ -1,0 +1,18 @@
+{
+  "calling_35c22b7281e0": {
+    "config": {
+      "assistant_id": "f61dcbca-7798-4ea3-a079-265c64cf14c4",
+      "phone_number_id": "d3eb68f5-300f-459e-96c7-aad19997b6e1",
+      "timeout_seconds": 120
+    },
+    "created_at": "2026-10-06T05:32:46.715327+00:00",
+    "credentials": {
+      "api_key": "env:VAPI_API_KEY"
+    },
+    "enabled": true,
+    "id": "calling_35c22b7281e0",
+    "name": "eval test",
+    "provider": "vapi",
+    "updated_at": "2026-10-06T05:32:46.715327+00:00"
+  }
+}

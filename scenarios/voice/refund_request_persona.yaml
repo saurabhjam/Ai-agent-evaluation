@@ -1,0 +1,25 @@
+scenario_id: automated_refund_voice_test
+agent:
+  channel: voice
+  adapter: local
+  config:
+    agent_url: "http://127.0.0.1:8001/api/voice"
+    audio_dir: "artifacts/voice"
+    tts:
+      provider: piper
+      model_path: "models/en_US-lessac-medium.onnx"
+
+max_turns: 5
+max_session_duration_seconds: 120
+pass_threshold: 0.7
+
+persona:
+  name: Refund Customer
+  goal: Get a refund for a damaged product. If asked for a photo, explain that you can't send one over the phone and offer to describe the damage instead.
+  tone: frustrated_but_polite
+  edge_case: null
+
+voice:
+  metrics:
+    latency_threshold_ms: 3000
+    allow_interruptions: false

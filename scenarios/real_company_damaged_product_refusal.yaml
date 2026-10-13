@@ -1,0 +1,52 @@
+scenario_id: "real_company_damaged_product_refusal"
+agent:
+  channel: chatbot
+  adapter: rest
+  config:
+    base_url: "http://127.0.0.1:8000"
+    session:
+      method: POST
+      path: "/api/v1/chat"
+      request:
+        customer_name: "DeepEval Test"
+        customer_email: "deepeval@test.com"
+      response:
+        session_token: "data.session_token"
+    send:
+      method: POST
+      path: "/api/v1/chat/{session_token}/messages"
+      content_type:
+        text: "application/x-www-form-urlencoded"
+        attachments: "multipart/form-data"
+      request:
+        message_field: "body"
+        attachments_field: "attachments[]"
+    receive:
+      method: GET
+      path: "/api/v1/chat/{session_token}/messages"
+      messages_path: "data"
+      sender_field: "sender_type"
+      sender_value: "ai"
+      text_field: "body"
+      polling:
+        interval_ms: 500
+        timeout_seconds: 30
+
+persona:
+  name: "DeepEval Test"
+  goal: "Report a damaged product."
+  tone: "impatient"
+  edge_case: "If the agent asks for a photo of the damage, refuse to provide one and demand a refund anyway. Never include the ATTACHMENT tag."
+
+max_turns: 5
+pass_threshold: 0.8
+rag_context: []
+agent_prompt: "You are testing the local company chatbot REST API."
+
+rag_context:
+  - "Damaged products received in transit are eligible for a replacement or a full refund."
+  - "The customer should provide the order number to locate the order."
+  - "The customer may be asked to provide a clear photo of the damaged product."
+  - "The customer can choose between a replacement and a refund when eligible."
+  - "The agent must not claim that a refund or replacement has been processed unless the backend confirms the action."
+  - "The agent must not invent order details, confirmation numbers, tracking numbers, or processing timelines."

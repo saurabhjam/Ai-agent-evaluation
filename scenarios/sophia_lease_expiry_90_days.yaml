@@ -1,0 +1,26 @@
+scenario_id: sophia_lease_expiry_90_days
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  role: leasing manager
+  goal: Identify leases expiring within the next 90 days.
+  tone: Professional and concise
+context:
+  portfolio: Authorized lease records with date information.
+  focus: Date-range filtering and lease follow-ups.
+  objective: Identify leases expiring within the next 90 days.
+behavior:
+- Ask for leases ending in the next 90 days.
+- Answer clarification questions naturally.
+- Ask which of the returned leases expires first.
+- Ask about one returned lease using its provided identifier.
+- Ask whether the result includes the 90-day boundary.
+- Use available clarification options or suggested buttons when supported.
+- Do not invent property names, people, records, or values.
+- Allow Sophia to guide the conversation when clarification is required.
+success_criteria:
+- Sophia applies the intended 90-day window consistently.
+- Returned leases and dates match authorized source records.
+- Sophia preserves lease context during follow-ups.
+pass_threshold: 0.7

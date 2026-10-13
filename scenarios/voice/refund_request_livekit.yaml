@@ -1,0 +1,41 @@
+name: "Refund Request (LiveKit)"
+description: "Voice agent handles a refund request over LiveKit"
+
+persona:
+  name: "Pratik"
+  goal: "I want a refund for my damaged product."
+  tone: "angry but cooperative"
+  behavior: "Provide the order details when asked and explain that the product arrived damaged."
+  system_prompt: |
+    You are an angry customer demanding a refund. You bought a widget that arrived broken.
+    You will not take no for an answer. You interrupt often.
+    
+    Keep your sentences very short.
+  first_message: "Hello? I want a refund now."
+
+evaluation:
+  metrics:
+    - name: "Goal Completion"
+      type: "boolean"
+      description: "Agent successfully processed or promised a refund."
+    - name: "Answer Relevancy"
+      type: "score"
+    - name: "Faithfulness"
+      type: "score"
+    - name: "Conversational Quality"
+      type: "score"
+
+voice:
+  channel: "voice"
+  adapter: "livekit"
+  config:
+    agent_name: "my-agent"
+    ice_transport: "relay"
+    connect_timeout: 15
+    tts:
+      provider: "piper"
+      voice: "en_US-lessac-medium"
+      model_path: "models/en_US-lessac-medium.onnx"
+    stt:
+      provider: "faster_whisper"
+      model: "small"

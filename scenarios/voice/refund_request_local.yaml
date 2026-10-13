@@ -1,0 +1,23 @@
+scenario_id: refund_request_local_v1
+channel: voice
+agent:
+  adapter: local
+  config:
+    agent_url: "http://127.0.0.1:8001/api/voice"
+    audio_dir: "artifacts/voice"
+persona:
+  name: "Priya"
+  goal: "Get a refund for an order that arrived damaged, order #A1022"
+  tone: "polite but increasingly impatient if the agent stalls"
+max_turns: 4
+pass_threshold: 0.7
+rag_context:
+  - "Refund policy: orders damaged in transit are eligible for a full refund within 30 days of delivery, no return shipping required."
+
+conversation:
+  turns:
+    # Deterministic mock server logic expects "refund" or "damage" to trigger paths.
+    - speaker: user
+      text: "I want a refund for my damaged product."
+    - speaker: agent
+      text: "Thank you for explaining the damage. I have recorded the issue and can continue with the refund request."

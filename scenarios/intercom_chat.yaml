@@ -1,0 +1,33 @@
+scenario_id: "intercom_chat"
+agent:
+  channel: chatbot
+  adapter: rest
+  config:
+    send:
+      method: POST
+      path: "/messenger/web/conversations/215476082008406/reply"
+      content_type: "application/x-www-form-urlencoded"
+      request:
+        message_field: "blocks"
+        message_template: '[{"type":"paragraph","text":"{{message}}"}]'
+    receive:
+      method: GET
+      path: "/messenger/web/conversations/215476082008406/read"
+      messages_path: "conversation_parts"
+      sender_field: "author.is_bot"
+      sender_value: true
+      text_field: "blocks[].text"
+      polling:
+        interval_ms: 1000
+        timeout_seconds: 30
+
+persona:
+  name: "pratik"
+  goal: "I received a damaged product and want help getting a refund."
+  tone: "neutral"
+  edge_case: "none"
+
+max_turns: 4
+pass_threshold: 0.7
+rag_context: []
+agent_prompt: "You are testing the Intercom company chatbot."

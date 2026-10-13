@@ -1,0 +1,47 @@
+scenario_id: maintenance_form_filling
+
+agent:
+  channel: chatbot
+
+persona:
+  name: Alex Johnson
+  role: Tenant
+  goal: "Submit a maintenance request by completing the maintenance form."
+  tone: "Professional and cooperative"
+
+context:
+  property_name: "Oakwood Apartments"
+  unit_number: "3B"
+  issue_category: "Plumbing"
+  issue_description: "The kitchen sink faucet is leaking continuously and the water pressure is very low."
+  urgency: "High"
+
+behavior:
+  - Tell the chatbot that you want to report a maintenance issue.
+  - Complete every form field requested by the chatbot.
+  - Provide the property name when requested.
+  - Provide the unit number when requested.
+  - Select Plumbing as the maintenance category.
+  - Describe the issue clearly.
+  - Mark the issue as High priority if the chatbot allows it.
+  - Answer all additional questions naturally.
+  - If mandatory information is missing, provide it when requested.
+  - Do not invent information unless it exists in the context.
+  - Continue until the chatbot confirms that the maintenance request has been submitted.
+
+success_criteria:
+  - The chatbot starts the maintenance request workflow.
+  - The chatbot presents a maintenance form or collects equivalent structured information.
+  - All required fields are collected.
+  - Required field validation works correctly.
+  - The property name is captured correctly.
+  - The unit number is captured correctly.
+  - The maintenance category is captured correctly.
+  - The issue description is captured correctly.
+  - The urgency is captured correctly.
+  - The chatbot summarizes the submitted information before confirmation (if supported).
+  - The chatbot confirms successful maintenance request creation.
+  - The chatbot maintains context throughout the conversation.
+  - The chatbot responds professionally.
+
+pass_threshold: 0.85

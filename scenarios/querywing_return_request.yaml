@@ -1,0 +1,32 @@
+scenario_id: querywing_return_request
+
+agent:
+  channel: chatbot
+
+persona:
+  name: Alex
+  role: customer
+  goal: "Return a product I purchased."
+  tone: "Polite but slightly frustrated"
+
+context:
+  product: "Wireless Headphones"
+  issue: "I want to return the product."
+
+behavior:
+  - Explain that you want to return the product.
+  - Ask about the return policy.
+  - Ask how to initiate the return.
+  - Ask what information is required.
+  - Do not invent an order number.
+  - Answer the agent's questions naturally.
+  - Continue until the return process is reasonably explained.
+
+success_criteria:
+  - Agent understands the return request.
+  - Agent explains the return process.
+  - Agent asks for required information when appropriate.
+  - Agent does not invent information.
+  - Agent maintains a professional tone.
+
+pass_threshold: 0.70

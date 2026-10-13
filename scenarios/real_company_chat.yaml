@@ -1,0 +1,41 @@
+scenario_id: "real_company_chat"
+agent:
+  channel: chatbot
+  adapter: rest
+  config:
+    base_url: "http://127.0.0.1:8001"
+    session:
+      method: POST
+      path: "/api/v1/chat"
+      request:
+        customer_name: "DeepEval Test"
+        customer_email: "deepeval@test.com"
+      response:
+        session_token: "data.session_token"
+    send:
+      method: POST
+      path: "/api/v1/chat/{session_token}/messages"
+      content_type: "application/x-www-form-urlencoded"
+      request:
+        message_field: "body"
+    receive:
+      method: GET
+      path: "/api/v1/chat/{session_token}/messages"
+      messages_path: "data"
+      sender_field: "sender_type"
+      sender_value: "ai"
+      text_field: "body"
+      polling:
+        interval_seconds: 1
+        timeout_seconds: 60
+
+persona:
+  name: "pratik"
+  goal: "I received a damaged product and want help getting a refund."
+  tone: "neutral"
+  edge_case: "none"
+
+max_turns: 4
+pass_threshold: 0.7
+rag_context: []
+agent_prompt: "You are testing the local company chatbot REST API."
