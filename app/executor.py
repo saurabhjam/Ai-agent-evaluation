@@ -257,6 +257,11 @@ class ScenarioExecutor:
                 "Failed to instantiate adapter for connection %s",
                 connection.id,
             )
+            if "evaluation_session" in locals():
+                try:
+                    evaluation_session.cleanup()
+                except Exception:
+                    logger.exception("Adapter initialization cleanup failed for connection %s", connection.id)
 
             return ExecutionResult(
                 success=False,

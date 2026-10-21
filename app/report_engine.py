@@ -119,6 +119,7 @@ class EvaluationReportEngine:
             "rag_validation": _rag_validation(rag, metrics, conversation),
             "backend_validation": backend_validation,
             "backend_validation_report": _backend_validation_report(backend_validation),
+            "technical_errors": _list(payload.get("technical_errors")),
             "failure_analysis": failures,
             "detailed_failure_analysis": detailed_failures,
             "evidence": payload.get("evidence") or payload.get("conversation_evidence") or [],
@@ -397,7 +398,11 @@ def _capability_matrix(payload: dict[str, Any], components: list[dict[str, Any]]
     for m in metrics:
         if isinstance(m, dict):
             cat = m.get("category") or "Conversation"
-            categories.setdefault(cat, []).append(_float(m.get("score")) or 0.0)
+            if cat == "base":
+                cat = "Conversation"
+            score = _float(m.get("score"))
+            if score is not None:
+                categories.setdefault(cat, []).append(score)
             
     cat_scores = {k: sum(v)/len(v) for k, v in categories.items()}
     
@@ -3122,9 +3127,13 @@ def _normalize_metric(metric: dict[str, Any], default_threshold: float | None = 
             passed = True
         elif status in {"fail", "failed", "failure", "error", "not_passed"}:
             passed = False
+    evaluation_status = str(metric.get("evaluation_status") or "").lower()
+    if evaluation_status in {"not_evaluated", "error"}:
+        passed = None
+        score = None
     normalized["score"] = score
     normalized["passed"] = passed
-    normalized["status"] = "PASS" if passed is True else ("FAIL" if passed is False else _value(metric.get("status")))
+    normalized["status"] = "NOT EVALUATED" if evaluation_status == "not_evaluated" else ("ERROR" if evaluation_status == "error" else ("PASS" if passed is True else ("FAIL" if passed is False else _value(metric.get("status")))))
     normalized["threshold"] = threshold
     normalized["name"] = metric.get("name") or metric.get("metric") or metric.get("label") or "Metric"
     normalized["category"] = metric.get("category") or _metric_category_from_name(normalized["name"])

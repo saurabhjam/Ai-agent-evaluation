@@ -114,18 +114,24 @@ def test_full_conversation_failures_reduce_scores_even_after_recovery():
         results = evaluate_transcript(persona, transcript, rag_context=None)
 
     by_name = {result.name: result for result in results}
+    assert by_name["Conversational Quality"].score <= 0.65
+    assert by_name["Context Retention"].score <= 0.55
+    assert by_name["Multi-turn Consistency"].score <= 0.55
+    for name in ("Conversational Quality", "Context Retention", "Multi-turn Consistency"):
+        assert by_name[name].passed is False
+        assert "Full-conversation penalty" in by_name[name].reason
+
     for name in (
         "Goal Completion",
-        "Conversational Quality",
-        "Context Retention",
-        "Multi-turn Consistency",
+        "Persona and Tone Adherence",
+        "Intent Understanding",
         "Answer Relevancy",
+        "Hallucination",
         "Completeness",
         "Response Quality",
     ):
-        assert by_name[name].score <= 0.55
-        assert by_name[name].passed is False
-        assert "Full-conversation penalty" in by_name[name].reason
+        assert by_name[name].score == 1.0
+        assert "Full-conversation penalty" not in by_name[name].reason
 
 
 def test_evaluate_transcript_with_turn_scoped_rag_evidence():

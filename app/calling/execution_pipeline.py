@@ -22,6 +22,7 @@ from app.calling.voice_transport import (
     transport_session_to_call_session,
 )
 from app.calling.voice_conversation_runner import VoiceConversationRunner
+from app.calling import diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,8 @@ class CallingExecutionPipeline:
                     f"Provider invariant violated: configured_provider '{configured_provider}' resolved to mock runtime."
                 )
 
-            if configured_provider == "mock":
+            from app.calling.providers.mock import MockCallProvider
+            if configured_provider == "mock" or isinstance(provider, MockCallProvider):
                 runner = CallSessionRunner(provider_adapter=provider)
                 runner_result = runner.run_mock_call(
                     to=to,
@@ -168,17 +170,7 @@ class CallingExecutionPipeline:
                 if configured_provider == "vapi":
                     logger.info("Real provider session assertion passed")
                 
-                # Simple synchronous poll (in a real system, webhooks would handle this async)
-                import time
-                deadline = time.monotonic() + 10  # 10 second timeout for POC
-                while time.monotonic() < deadline:
-                    status = provider.get_call_status(session)
-                    if configured_provider == "vapi":
-                        logger.info("Polled Vapi status: %s", status.value)
-                    session = session.model_copy(update={"status": status})
-                    if status in {CallStatus.completed, CallStatus.failed, CallStatus.timed_out}:
-                        break
-                    time.sleep(1)
+                session = provider.wait_for_completion(session)
                 
                 provider_events = provider.fetch_events(session)
                 recording = provider.fetch_recording(session)
@@ -399,7 +391,10 @@ def _fetch_provider_transcript(provider, session) -> RawCallTranscript | None:
     if not callable(fetch_transcript):
         return None
     try:
-        return fetch_transcript(session)
+        with diagnostics.stage("provider.fetch_transcript", "provider_adapter"):
+            transcript = fetch_transcript(session)
+        diagnostics.provider_transcript(transcript)
+        return transcript
     except Exception:
         logger.exception(
             "Provider transcript fetch failed for provider=%s call_id=%s",
@@ -542,6 +537,8 @@ def _voice_conversation_runner(context: CallingExecutionContext) -> VoiceConvers
             device=stt_config.get("device", "cpu"),
             compute_type=stt_config.get("compute_type", "int8"),
             language=stt_config.get("language"),
+            cpu_threads=stt_config.get("cpu_threads"),
+            beam_size=int(stt_config.get("beam_size", 1)),
         ),
         tts_provider=PiperTTS(
             voice=tts_config.get("voice", "en_US-lessac-medium"),

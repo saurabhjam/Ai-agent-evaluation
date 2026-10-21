@@ -60,6 +60,35 @@ const API = {
   testCallingConnection:   (id)     => API.post("/calling/connections/" + id + "/test"),
   runCallingEvaluation:    (id, d)  => API.post("/calling/connections/" + id + "/run", d),
   listEvaluations:         ()       => API.get("/evaluations"),
+  listManagementAgents:    (params) => {
+    var query = new URLSearchParams();
+    Object.keys(params || {}).forEach(function(key) {
+      var value = params[key];
+      if (value !== undefined && value !== null && value !== "") query.set(key, value);
+    });
+    var suffix = query.toString();
+    return API.get("/management/agents" + (suffix ? "?" + suffix : ""));
+  },
+  getManagementAgent:      (key) => API.get("/management/agents/" + encodeURIComponent(key)),
+  listManagementScenarios: (key) => API.get("/management/agents/" + encodeURIComponent(key) + "/scenarios"),
+  listManagementEvaluations: (key, params) => {
+    var query = new URLSearchParams();
+    Object.keys(params || {}).forEach(function(name) {
+      var value = params[name];
+      if (value !== undefined && value !== null && value !== "") query.set(name, value);
+    });
+    var suffix = query.toString();
+    return API.get("/management/agents/" + encodeURIComponent(key) + "/evaluations" + (suffix ? "?" + suffix : ""));
+  },
+  getConsolidatedReport: (key, params) => {
+    var query = new URLSearchParams();
+    Object.keys(params || {}).forEach(function(name) {
+      var value = params[name];
+      if (value !== undefined && value !== null && value !== "") query.set(name, value);
+    });
+    var suffix = query.toString();
+    return API.get("/management/agents/" + encodeURIComponent(key) + "/consolidated-report" + (suffix ? "?" + suffix : ""));
+  },
   getEvaluation:           (id)     => API.get("/evaluations/" + id),
   getEvaluationReport:     (id)     => API.get("/evaluations/" + id + "/report"),
   getEvaluationTranscript: (id)     => API.get("/evaluations/" + id + "/transcript"),
@@ -72,6 +101,16 @@ const State = {
   connections:    [],
   scenarios:      [],
   evaluations:    [],     // in-memory, session-scoped
+  managementAgents: [],
+  managementFilters: { query: "", agent_type: "", provider: "" },
+  selectedManagementAgent: null,
+  managementAgentDetail: null,
+  managementScenarios: [],
+  managementEvaluationPage: 1,
+  managementEvaluationFilters: { scenario_id: "", status: "", date_from: "", date_to: "" },
+  consolidatedReport: null,
+  consolidatedReportFilters: { scenario_id: "", status: "", date_from: "", date_to: "" },
+  reportReturnPage: "eval-details",
   currentEval:    null,
   currentReport:  null,
   interactionsWs: null,
@@ -230,7 +269,6 @@ var App = window.App = {
     App.checkBackend();
     setInterval(App.checkBackend, 12000);
     App._bindInteractionModal();
-    await App.loadPersistedEvaluations();
 
     App.navigate("dashboard");
   },
@@ -256,7 +294,7 @@ var App = window.App = {
     if (navEl) navEl.classList.add("active");
 
     // Update breadcrumb
-    var label = { dashboard: "Dashboard", connections: "Connections", calling: "AI Calling", evaluations: "Evaluations", scenarios: "Scenarios", settings: "Settings", "eval-details": "Evaluation Details", "eval-report": "AI Agent Assessment Report", "run-eval": "Run Evaluation" };
+    var label = { dashboard: "Management Dashboard", connections: "Connections", calling: "AI Calling", evaluations: "Evaluations", scenarios: "Scenarios", settings: "Settings", "eval-details": "Evaluation Details", "agent-details": "Agent Details", "consolidated-report": "Consolidated Evaluation Report", "eval-report": "AI Agent Assessment Report", "run-eval": "Run Evaluation" };
     var el = document.getElementById("breadcrumb-current");
     if (el) el.textContent = label[page] || (page.charAt(0).toUpperCase() + page.slice(1).replace(/-/g, " "));
 
@@ -267,6 +305,8 @@ var App = window.App = {
       case "evaluations":  App.loadEvaluations();      break;
       case "scenarios":    App.loadScenarios();        break;
       case "eval-details": App.renderEvalDetails(extra); break;
+      case "agent-details": App.loadManagementAgentDetails(extra); break;
+      case "consolidated-report": App.loadConsolidatedReport(extra); break;
       case "eval-report":  App.renderProfessionalReport(extra); break;
     }
   },
@@ -374,41 +414,458 @@ var App = window.App = {
      DASHBOARD PAGE
      ══════════════════════════════════════════════════════════ */
   async loadDashboard() {
-    // Reset to dash placeholders
-    ["stat-total","stat-passed","stat-failed","stat-connections"].forEach(function(id) {
+    var statIds = ["stat-management-agents", "stat-management-runs", "stat-management-scenarios", "stat-management-passed", "stat-management-failed", "stat-management-errors"];
+    statIds.forEach(function(id) {
       var el = document.getElementById(id);
       if (el) el.innerHTML = '<div class="spinner sm"></div>';
     });
+    var content = document.getElementById("management-agents-content");
+    var count = document.getElementById("management-result-count");
+    if (count) count.textContent = "";
+    if (content) content.innerHTML = '<div class="management-loading" role="status"><div class="spinner"></div><span>Loading evaluated agents...</span></div>';
 
-    // Load connection count from backend
     try {
-      var conns = await API.listConnections();
-      State.connections = conns;
-      document.getElementById("stat-connections").textContent = conns.length;
+      var agents = await App._loadAllManagementAgents();
+      State.managementAgents = agents;
+      App._renderManagementSummary(agents);
+      App._renderManagementAgents(agents);
     } catch (e) {
-      document.getElementById("stat-connections").textContent = "—";
+      statIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = "—";
+      });
+      if (content) {
+        content.innerHTML = '<div class="management-error-state" role="alert">' +
+          '<div class="management-error-icon">' + Icon.alert + '</div>' +
+          '<div><strong>Management data could not be loaded</strong><p>' + escHtml(e.message) + '</p></div>' +
+          '<button class="btn btn-secondary btn-sm" onclick="App.loadDashboard()">Retry</button>' +
+          '</div>';
+      }
     }
+  },
 
-    // Evaluation stats from in-memory session data
-    var evals = State.evaluations;
-    var passed = evals.filter(ev => ev.success !== false && ev.passed).length;
-    var failed = evals.filter(ev => ev.success === false || !ev.passed).length;
-    document.getElementById("stat-total").textContent  = evals.length;
-    document.getElementById("stat-passed").textContent = passed;
-    document.getElementById("stat-failed").textContent = failed;
+  async _loadAllManagementAgents() {
+    var params = Object.assign({ page: 1, page_size: 100 }, State.managementFilters);
+    var first = await API.listManagementAgents(params);
+    var agents = Array.isArray(first) ? first : (first.items || []);
+    var pages = Number(first && first.pages) || 1;
+    if (pages > 1) {
+      var requests = [];
+      for (var page = 2; page <= pages; page += 1) {
+        requests.push(API.listManagementAgents(Object.assign({}, params, { page: page })));
+      }
+      var remaining = await Promise.all(requests);
+      remaining.forEach(function(result) {
+        agents = agents.concat(Array.isArray(result) ? result : (result.items || []));
+      });
+    }
+    return agents;
+  },
 
-    // Recent evaluations table
-    var tableEl = document.getElementById("recent-evals-table");
-    if (!evals.length) {
-      tableEl.innerHTML = App._emptyStateHtml(Icon.bar,
-        "No evaluations yet",
-        "Connect an agent and run an evaluation to see results here.",
-        '<button class="btn btn-primary btn-sm" onclick="App.navigate(\'connections\')">' + Icon.zap + " Go to Connections</button>"
+  _renderManagementSummary(agents) {
+    var totals = agents.reduce(function(summary, agent) {
+      var outcomes = agent.outcome_counts || {};
+      summary.runs += Number(agent.total_runs) || 0;
+      summary.scenarios += Number(agent.unique_scenarios) || 0;
+      summary.passed += Number(outcomes.passed) || 0;
+      summary.failed += Number(outcomes.failed) || 0;
+      summary.errors += Number(outcomes.error) || 0;
+      return summary;
+    }, { runs: 0, scenarios: 0, passed: 0, failed: 0, errors: 0 });
+    document.getElementById("stat-management-agents").textContent = agents.length;
+    document.getElementById("stat-management-runs").textContent = totals.runs;
+    document.getElementById("stat-management-scenarios").textContent = totals.scenarios;
+    document.getElementById("stat-management-passed").textContent = totals.passed;
+    document.getElementById("stat-management-failed").textContent = totals.failed;
+    document.getElementById("stat-management-errors").textContent = totals.errors;
+  },
+
+  _renderManagementAgents(agents) {
+    var content = document.getElementById("management-agents-content");
+    var count = document.getElementById("management-result-count");
+    if (count) count.textContent = agents.length + (agents.length === 1 ? " agent" : " agents");
+    if (!agents.length) {
+      content.innerHTML = App._emptyStateHtml(Icon.bar,
+        "No evaluated agents yet",
+        "Agents will appear here after their first evaluation. Historical evaluations remain available on the Evaluations page."
       );
       return;
     }
-    tableEl.innerHTML = App._buildEvalsTable(evals.slice().reverse().slice(0, 10), true);
+
+    var rows = agents.map(function(agent) {
+      var outcomes = agent.outcome_counts || {};
+      var warnings = Array.isArray(agent.comparability_warnings) ? agent.comparability_warnings : [];
+      var provider = agent.provider || agent.adapter || "N/A";
+      var connectionAvailable = String(agent.connection_status || "").toLowerCase() !== "missing";
+      var warningHtml = warnings.length
+        ? '<span class="management-warning" title="' + escAttr(warnings.join(" | ")) + '" aria-label="Comparability warning">' + Icon.alert + '<span>' + warnings.length + '</span></span>'
+        : '<span class="management-no-warning" aria-label="No comparability warnings">—</span>';
+      var score = agent.overall_average_score === null || agent.overall_average_score === undefined
+        ? "—"
+        : fmtScore(agent.overall_average_score);
+      return '<tr class="management-agent-row" data-agent-key="' + escAttr(agent.agent_key || "") + '" tabindex="0" role="button" aria-label="Open Agent Details for ' + escAttr(agent.name || "Unnamed agent") + '">' +
+        '<td class="td-primary"><span class="management-agent-name">' + escHtml(agent.name || "Unnamed agent") + '</span><span class="management-agent-key">' + escHtml(agent.agent_key || "N/A") + '</span></td>' +
+        '<td>' + agentTypeBadge(agent.agent_type || "chatbot") + '</td>' +
+        '<td>' + escHtml(provider) + '</td>' +
+        '<td class="management-number">' + (Number(agent.total_runs) || 0) + '</td>' +
+        '<td class="management-number">' + (Number(agent.unique_scenarios) || 0) + '</td>' +
+        '<td class="management-number outcome-pass">' + (Number(outcomes.passed) || 0) + '</td>' +
+        '<td class="management-number outcome-fail">' + (Number(outcomes.failed) || 0) + '</td>' +
+        '<td class="management-number outcome-error">' + (Number(outcomes.error) || 0) + '</td>' +
+        '<td class="management-number">' + (Number(outcomes.unknown) || 0) + '</td>' +
+        '<td class="management-score">' + escHtml(score) + '</td>' +
+        '<td>' + escHtml(agent.latest_evaluation_at ? fmtDate(agent.latest_evaluation_at) : "—") + '</td>' +
+        '<td><span class="conn-status-active"><span class="conn-status-dot ' + (connectionAvailable ? "on" : "off") + '"></span>' + escHtml(connectionAvailable ? "Available" : "Missing") + '</span></td>' +
+        '<td>' + warningHtml + '</td>' +
+        '</tr>';
+    }).join("");
+
+    content.innerHTML = '<table class="management-agents-table"><thead><tr>' +
+      '<th>Agent</th><th>Type</th><th>Provider / Adapter</th><th>Runs</th><th>Scenarios</th>' +
+      '<th>Passed</th><th>Failed</th><th>Errors</th><th>Unknown</th><th>Avg Score</th>' +
+      '<th>Latest Evaluation</th><th>Connection</th><th>Warnings</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+    App._bindManagementAgentRows();
   },
+
+  _bindManagementAgentRows() {
+    document.querySelectorAll(".management-agent-row").forEach(function(row) {
+      var open = function() { App.openManagementAgent(row.dataset.agentKey); };
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", function(event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open();
+        }
+      });
+    });
+  },
+
+  applyManagementFilters() {
+    State.managementFilters = {
+      query: (document.getElementById("management-search").value || "").trim(),
+      agent_type: document.getElementById("management-agent-type").value || "",
+      provider: (document.getElementById("management-provider").value || "").trim()
+    };
+    App.loadDashboard();
+  },
+
+  clearManagementFilters() {
+    document.getElementById("management-search").value = "";
+    document.getElementById("management-agent-type").value = "";
+    document.getElementById("management-provider").value = "";
+    State.managementFilters = { query: "", agent_type: "", provider: "" };
+    App.loadDashboard();
+  },
+
+  openManagementAgent(agentKey) {
+    var agent = State.managementAgents.find(function(item) { return item.agent_key === agentKey; });
+    State.selectedManagementAgent = agent || { agent_key: agentKey, name: "Agent" };
+    App.navigate("agent-details", State.selectedManagementAgent);
+  },
+
+  async loadManagementAgentDetails(agent) {
+    agent = agent || State.selectedManagementAgent;
+    var container = document.getElementById("agent-details-content");
+    if (!container) return;
+    if (!agent) {
+      App.navigate("dashboard");
+      return;
+    }
+    State.selectedManagementAgent = agent;
+    container.innerHTML = '<div class="management-detail-loading"><div class="spinner lg"></div><span>Loading agent details...</span></div>';
+    try {
+      var detail = await API.getManagementAgent(agent.agent_key);
+      State.managementAgentDetail = detail;
+      State.selectedManagementAgent = detail;
+      State.managementEvaluationPage = 1;
+      State.managementEvaluationFilters = { scenario_id: "", status: "", date_from: "", date_to: "" };
+      App._renderManagementAgentShell(detail);
+      App.loadManagementScenarios(detail.agent_key);
+      App.loadManagementEvaluationHistory(detail.agent_key, 1);
+    } catch (e) {
+      container.innerHTML = '<div class="agent-detail-error">' +
+        '<button class="btn btn-ghost btn-sm" onclick="App.navigate(\'dashboard\')">' + Icon.back + ' Back to Management Dashboard</button>' +
+        '<div class="management-error-state" role="alert"><div class="management-error-icon">' + Icon.alert + '</div>' +
+        '<div><strong>Agent details could not be loaded</strong><p>' + escHtml(e.message) + '</p></div>' +
+        '<button class="btn btn-secondary btn-sm" onclick="App.loadManagementAgentDetails(State.selectedManagementAgent)">Retry</button></div></div>';
+    }
+  },
+
+  _renderManagementAgentShell(agent) {
+    var outcomes = agent.outcome_counts || {};
+    var provider = agent.provider || agent.adapter || "N/A";
+    var available = String(agent.connection_status || "").toLowerCase() !== "missing";
+    var warnings = Array.isArray(agent.comparability_warnings) ? agent.comparability_warnings : [];
+    var score = agent.overall_average_score === null || agent.overall_average_score === undefined ? "—" : fmtScore(agent.overall_average_score);
+    var container = document.getElementById("agent-details-content");
+    container.innerHTML = '<div class="management-agent-detail">' +
+      '<div class="agent-detail-toolbar"><button class="btn btn-ghost btn-sm" onclick="App.navigate(\'dashboard\')">' + Icon.back + ' Back to Management Dashboard</button>' +
+      '<button class="btn btn-primary btn-sm" onclick="App.openConsolidatedReport()">' + Icon.doc + ' Consolidated Report</button></div>' +
+      '<header class="agent-detail-header"><div><div class="agent-detail-heading-row"><h1>' + escHtml(agent.name || "Unnamed agent") + '</h1>' + agentTypeBadge(agent.agent_type || "chatbot") + '</div>' +
+      '<div class="agent-detail-meta"><span>' + escHtml(provider) + '</span><span class="conn-status-active"><span class="conn-status-dot ' + (available ? "on" : "off") + '"></span>' + escHtml(available ? "Connection available" : "Connection missing") + '</span><span>Latest: ' + escHtml(agent.latest_evaluation_at ? fmtDate(agent.latest_evaluation_at) : "—") + '</span></div>' +
+      '<div class="agent-details-key">' + escHtml(agent.agent_key || "N/A") + '</div></div></header>' +
+      (warnings.length ? '<section class="management-comparability" aria-label="Comparability warnings"><div class="management-comparability-title">' + Icon.alert + ' Comparability warnings</div><ul>' + warnings.map(function(item) { return '<li>' + escHtml(item) + '</li>'; }).join("") + '</ul></section>' : '') +
+      '<div class="agent-summary-grid">' +
+        App._agentSummaryCard("Total Evaluation Runs", Number(agent.total_runs) || 0, "blue") +
+        App._agentSummaryCard("Unique Scenarios", Number(agent.unique_scenarios) || 0, "purple") +
+        App._agentSummaryCard("Passed", Number(outcomes.passed) || 0, "green") +
+        App._agentSummaryCard("Failed", Number(outcomes.failed) || 0, "red") +
+        App._agentSummaryCard("Technical Errors", Number(outcomes.error) || 0, "warning") +
+        App._agentSummaryCard("Unknown Outcomes", Number(outcomes.unknown) || 0, "neutral") +
+        App._agentSummaryCard("Overall Average Score", score, "blue") +
+      '</div>' +
+      '<section class="management-detail-section"><div class="management-detail-section-head"><div><h2>Scenario Summary</h2><p>Latest valid result for each unique scenario.</p></div></div><div id="management-scenarios-content" class="table-wrapper"></div></section>' +
+      '<section class="management-detail-section"><div class="management-detail-section-head"><div><h2>Evaluation History</h2><p>Every qualifying post-baseline run for this agent.</p></div></div>' +
+        App._managementHistoryFilters() +
+        '<div id="management-history-content" class="table-wrapper"></div><div id="management-history-pagination" class="management-pagination"></div>' +
+      '</section></div>';
+  },
+
+  _agentSummaryCard(label, value, tone) {
+    return '<div class="agent-summary-card ' + escAttr(tone || "neutral") + '"><div class="agent-summary-value">' + escHtml(value) + '</div><div class="agent-summary-label">' + escHtml(label) + '</div></div>';
+  },
+
+  _managementHistoryFilters() {
+    return '<div class="management-history-filters" aria-label="Evaluation history filters">' +
+      '<div><label class="form-label" for="management-history-scenario">Scenario</label><select class="form-input" id="management-history-scenario"><option value="">All scenarios</option>' +
+      State.managementScenarios.map(function(item) { return '<option value="' + escAttr(item.scenario_id) + '">' + escHtml(item.scenario_id) + '</option>'; }).join("") + '</select></div>' +
+      '<div><label class="form-label" for="management-history-status">Outcome</label><select class="form-input" id="management-history-status"><option value="">All outcomes</option><option value="pass">Pass</option><option value="fail">Fail</option><option value="error">Error</option><option value="unknown">Unknown</option></select></div>' +
+      '<div><label class="form-label" for="management-history-from">From</label><input class="form-input" id="management-history-from" type="date"></div>' +
+      '<div><label class="form-label" for="management-history-to">To</label><input class="form-input" id="management-history-to" type="date"></div>' +
+      '<div class="management-filter-actions"><button class="btn btn-primary btn-sm" onclick="App.applyManagementHistoryFilters()">Apply</button><button class="btn btn-secondary btn-sm" onclick="App.clearManagementHistoryFilters()">Clear</button></div></div>';
+  },
+
+  async loadManagementScenarios(agentKey) {
+    var content = document.getElementById("management-scenarios-content");
+    if (!content) return;
+    content.innerHTML = '<table><thead><tr><th>Scenario</th><th>Runs</th><th>Latest Valid Evaluation</th><th>Latest Score</th><th>Latest Outcome</th><th>Last Evaluated</th></tr></thead><tbody>' + loadingRows(6) + '</tbody></table>';
+    try {
+      var scenarios = await API.listManagementScenarios(agentKey);
+      State.managementScenarios = Array.isArray(scenarios) ? scenarios : [];
+      App._renderManagementScenarios(State.managementScenarios);
+      App._refreshManagementScenarioFilter();
+    } catch (e) {
+      content.innerHTML = '<div class="management-inline-error">' + alertHtml("Scenario summary could not be loaded: " + e.message, "error") + '<button class="btn btn-secondary btn-sm" onclick="App.loadManagementScenarios(\'' + escAttr(agentKey) + '\')">Retry</button></div>';
+    }
+  },
+
+  _renderManagementScenarios(scenarios) {
+    var content = document.getElementById("management-scenarios-content");
+    if (!scenarios.length) {
+      content.innerHTML = App._emptyStateHtml(Icon.doc, "No evaluated scenarios yet.", "Scenario results will appear after this agent is evaluated.");
+      return;
+    }
+    var rows = scenarios.map(function(item) {
+      var latest = item.latest_valid_run;
+      return '<tr><td class="td-primary">' + escHtml(item.scenario_id || "Unknown") + '</td><td>' + (Number(item.total_runs) || 0) + '</td>' +
+        '<td>' + escHtml(latest && latest.evaluation_id ? latest.evaluation_id : "—") + '</td><td class="management-score">' + escHtml(latest && latest.overall_score !== null && latest.overall_score !== undefined ? fmtScore(latest.overall_score) : "—") + '</td>' +
+        '<td>' + App._managementOutcomeBadge(latest ? latest.status : "unknown") + '</td><td>' + escHtml(latest && latest.created_at ? fmtDate(latest.created_at) : "—") + '</td></tr>';
+    }).join("");
+    content.innerHTML = '<table class="management-scenario-table"><thead><tr><th>Scenario</th><th>Runs</th><th>Latest Valid Evaluation</th><th>Latest Score</th><th>Latest Outcome</th><th>Last Evaluated</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  },
+
+  _refreshManagementScenarioFilter() {
+    var select = document.getElementById("management-history-scenario");
+    if (!select) return;
+    var current = State.managementEvaluationFilters.scenario_id || "";
+    select.innerHTML = '<option value="">All scenarios</option>' + State.managementScenarios.map(function(item) { return '<option value="' + escAttr(item.scenario_id) + '">' + escHtml(item.scenario_id) + '</option>'; }).join("");
+    select.value = current;
+  },
+
+  async loadManagementEvaluationHistory(agentKey, page) {
+    var content = document.getElementById("management-history-content");
+    var pagination = document.getElementById("management-history-pagination");
+    if (!content) return;
+    State.managementEvaluationPage = page || 1;
+    content.innerHTML = '<table><thead><tr><th>Scenario</th><th>Evaluation ID</th><th>Date / Time</th><th>Provider</th><th>Score</th><th>Outcome</th><th>Technical Status</th><th>Report</th></tr></thead><tbody>' + loadingRows(8) + '</tbody></table>';
+    if (pagination) pagination.innerHTML = "";
+    var filters = State.managementEvaluationFilters;
+    var params = { page: State.managementEvaluationPage, page_size: 25, scenario_id: filters.scenario_id, status: filters.status };
+    if (filters.date_from) params.date_from = filters.date_from + "T00:00:00Z";
+    if (filters.date_to) params.date_to = filters.date_to + "T23:59:59.999Z";
+    try {
+      var result = await API.listManagementEvaluations(agentKey, params);
+      App._renderManagementEvaluationHistory(result);
+    } catch (e) {
+      content.innerHTML = '<div class="management-inline-error">' + alertHtml("Evaluation history could not be loaded: " + e.message, "error") + '<button class="btn btn-secondary btn-sm" onclick="App.loadManagementEvaluationHistory(\'' + escAttr(agentKey) + '\',' + State.managementEvaluationPage + ')">Retry</button></div>';
+    }
+  },
+
+  _renderManagementEvaluationHistory(result) {
+    var content = document.getElementById("management-history-content");
+    var items = Array.isArray(result.items) ? result.items : [];
+    var agent = State.managementAgentDetail || {};
+    var provider = agent.provider || agent.adapter || "N/A";
+    if (!items.length) {
+      content.innerHTML = App._emptyStateHtml(Icon.bar, "No evaluations match the selected filters.", "Adjust the filters or run another evaluation for this agent.");
+    } else {
+      var rows = items.map(function(item) {
+        var technical = item.status === "error" ? '<span class="badge badge-warning">ERROR</span>' : '<span class="badge badge-gray">—</span>';
+        var reportButton = item.evaluation_id && item.report_url
+          ? '<button class="btn btn-ghost btn-sm management-view-report" data-evaluation-id="' + escAttr(item.evaluation_id) + '">' + Icon.eye + ' View Report</button>'
+          : '<button class="btn btn-ghost btn-sm" disabled>Unavailable</button>';
+        return '<tr><td class="td-primary">' + escHtml(item.scenario_id || "Unknown") + '</td><td><span class="management-evaluation-id">' + escHtml(item.evaluation_id || "—") + '</span></td>' +
+          '<td>' + escHtml(item.created_at ? fmtDate(item.created_at) : "—") + '</td><td>' + escHtml(provider) + '</td>' +
+          '<td class="management-score">' + escHtml(item.overall_score === null || item.overall_score === undefined ? "—" : fmtScore(item.overall_score)) + '</td>' +
+          '<td>' + App._managementOutcomeBadge(item.status) + '</td><td>' + technical + '</td><td>' + reportButton + '</td></tr>';
+      }).join("");
+      content.innerHTML = '<table class="management-history-table"><thead><tr><th>Scenario</th><th>Evaluation ID</th><th>Date / Time</th><th>Provider</th><th>Score</th><th>Outcome</th><th>Technical Status</th><th>Report</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      document.querySelectorAll(".management-view-report").forEach(function(button) {
+        button.addEventListener("click", function() { App.openManagementEvaluationReport(button.dataset.evaluationId); });
+      });
+    }
+    App._renderManagementPagination(result);
+  },
+
+  _managementOutcomeBadge(status) {
+    status = String(status || "unknown").toLowerCase();
+    if (status === "pass") return '<span class="badge badge-pass">' + Icon.check + ' PASS</span>';
+    if (status === "fail") return '<span class="badge badge-fail">' + Icon.x + ' FAIL</span>';
+    if (status === "error") return '<span class="badge badge-warning">' + Icon.alert + ' ERROR</span>';
+    return '<span class="badge badge-gray">UNKNOWN</span>';
+  },
+
+  _renderManagementPagination(result) {
+    var pagination = document.getElementById("management-history-pagination");
+    if (!pagination) return;
+    var page = Number(result.page) || 1;
+    var pages = Number(result.pages) || 0;
+    var total = Number(result.total) || 0;
+    pagination.innerHTML = '<span>' + total + ' total · Page ' + page + ' of ' + (pages || 1) + '</span><div>' +
+      '<button class="btn btn-secondary btn-sm" ' + (page <= 1 ? 'disabled' : '') + ' onclick="App.changeManagementHistoryPage(' + (page - 1) + ')">' + Icon.back + ' Previous</button>' +
+      '<button class="btn btn-secondary btn-sm" ' + (page >= pages ? 'disabled' : '') + ' onclick="App.changeManagementHistoryPage(' + (page + 1) + ')">Next</button></div>';
+  },
+
+  changeManagementHistoryPage(page) {
+    if (page < 1 || !State.managementAgentDetail) return;
+    App.loadManagementEvaluationHistory(State.managementAgentDetail.agent_key, page);
+  },
+
+  applyManagementHistoryFilters() {
+    State.managementEvaluationFilters = {
+      scenario_id: document.getElementById("management-history-scenario").value || "",
+      status: document.getElementById("management-history-status").value || "",
+      date_from: document.getElementById("management-history-from").value || "",
+      date_to: document.getElementById("management-history-to").value || ""
+    };
+    App.loadManagementEvaluationHistory(State.managementAgentDetail.agent_key, 1);
+  },
+
+  clearManagementHistoryFilters() {
+    State.managementEvaluationFilters = { scenario_id: "", status: "", date_from: "", date_to: "" };
+    ["management-history-scenario", "management-history-status", "management-history-from", "management-history-to"].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+    App.loadManagementEvaluationHistory(State.managementAgentDetail.agent_key, 1);
+  },
+
+  async openManagementEvaluationReport(evaluationId) {
+    if (!evaluationId) return;
+    State.reportReturnPage = "agent-details";
+    if (State.currentPage === "consolidated-report") State.reportReturnPage = "consolidated-report";
+    await App.openProfessionalReport({ evaluation_id: evaluationId });
+  },
+
+  returnFromProfessionalReport() {
+    if (State.reportReturnPage === "consolidated-report" && State.managementAgentDetail) {
+      App.navigate("consolidated-report", State.managementAgentDetail);
+      return;
+    }
+    if (State.reportReturnPage === "agent-details" && State.managementAgentDetail) {
+      App.navigate("agent-details", State.managementAgentDetail);
+      return;
+    }
+    App.navigate("eval-details");
+  },
+
+  openConsolidatedReport() {
+    if (!State.managementAgentDetail) return;
+    State.consolidatedReportFilters = { scenario_id: "", status: "", date_from: "", date_to: "" };
+    App.navigate("consolidated-report", State.managementAgentDetail);
+  },
+
+  async loadConsolidatedReport(agent) {
+    agent = agent || State.managementAgentDetail || State.selectedManagementAgent;
+    var content = document.getElementById("consolidated-report-content");
+    if (!content || !agent || !agent.agent_key) {
+      if (content) content.innerHTML = App._emptyStateHtml(Icon.doc, "No agent selected", "Return to Management Dashboard and select an evaluated agent.");
+      return;
+    }
+    State.managementAgentDetail = agent;
+    content.innerHTML = '<div class="management-detail-loading"><div class="spinner lg"></div><span>Building consolidated report from persisted evaluations...</span></div>';
+    var filters = State.consolidatedReportFilters || {};
+    var params = { scenario_id: filters.scenario_id, status: filters.status };
+    if (filters.date_from) params.date_from = filters.date_from + "T00:00:00Z";
+    if (filters.date_to) params.date_to = filters.date_to + "T23:59:59.999Z";
+    try {
+      State.consolidatedReport = await API.getConsolidatedReport(agent.agent_key, params);
+      App.renderConsolidatedReport(State.consolidatedReport);
+    } catch (e) {
+      content.innerHTML = '<div class="agent-detail-toolbar"><button class="btn btn-ghost btn-sm" onclick="App.navigate(\'agent-details\', State.managementAgentDetail)">' + Icon.back + ' Back to Agent Details</button></div>' +
+        '<div class="management-error-state" role="alert"><div class="management-error-icon">' + Icon.alert + '</div><div><h3>Consolidated report unavailable</h3><p>' + escHtml(e.message) + '</p></div></div>';
+    }
+  },
+
+  renderConsolidatedReport(report) {
+    var content = document.getElementById("consolidated-report-content");
+    if (!content) return;
+    var executive = report.executive_summary || {};
+    var coverage = report.evaluation_coverage || {};
+    var sections = Array.isArray(report.section_order) ? report.section_order : [];
+    var html = '<div class="consolidated-report-shell">' + App._consolidatedToolbar(report) +
+      '<header class="consolidated-report-cover"><div class="consolidated-eyebrow">EvalForge Management</div><h1>Consolidated Evaluation Report</h1><p>' + escHtml(report.agent_name || "Unnamed agent") + '</p><div class="consolidated-cover-meta"><span>' + escHtml(report.agent_type || "N/A") + '</span><span>' + escHtml(report.provider || report.adapter || "N/A") + '</span><span>Generated ' + escHtml(fmtDate(report.generated_at)) + '</span></div></header>';
+    html += App._consolidatedSection(sections[0], App._consolidatedExecutive(executive));
+    html += App._consolidatedSection(sections[1], App._consolidatedCoverage(coverage));
+    html += App._consolidatedSection(sections[2], App._consolidatedMetrics(report.consolidated_metrics || []));
+    html += App._consolidatedSection(sections[3], App._consolidatedScenarios(report.scenario_results || []));
+    html += App._consolidatedSection(sections[4], App._consolidatedIssues(report.critical_failures || []));
+    html += App._consolidatedSection(sections[5], App._consolidatedRecommendations(report.recommendations || []));
+    html += App._consolidatedSection(sections[6], App._consolidatedHistory(report.historical_comparison || {}));
+    html += App._consolidatedSection(sections[7], App._consolidatedReferences(report.individual_reports || []));
+    content.innerHTML = html + '</div>';
+    content.querySelectorAll(".consolidated-individual-report").forEach(function(button) {
+      button.addEventListener("click", function() { App.openManagementEvaluationReport(button.dataset.evaluationId); });
+    });
+  },
+
+  _consolidatedToolbar(report) {
+    var filters = State.consolidatedReportFilters || {};
+    var scenarios = State.managementScenarios || [];
+    var scenarioOptions = scenarios.map(function(item) { return '<option value="' + escAttr(item.scenario_id) + '" ' + (filters.scenario_id === item.scenario_id ? 'selected' : '') + '>' + escHtml(item.scenario_id) + '</option>'; }).join("");
+    var base = "/management/agents/" + encodeURIComponent(report.agent_key) + "/consolidated-report/";
+    var query = new URLSearchParams();
+    Object.keys(filters).forEach(function(key) { if (filters[key]) query.set(key, key.indexOf("date_") === 0 ? filters[key] + (key === "date_from" ? "T00:00:00Z" : "T23:59:59.999Z") : filters[key]); });
+    var suffix = query.toString() ? "?" + query.toString() : "";
+    return '<div class="consolidated-toolbar"><button class="btn btn-ghost btn-sm" onclick="App.navigate(\'agent-details\', State.managementAgentDetail)">' + Icon.back + ' Back to Agent Details</button><div class="consolidated-downloads">' +
+      App._reportDownloadLink(Config.apiBase + base + "pdf" + suffix, "Download PDF") + App._reportDownloadLink(Config.apiBase + base + "html" + suffix, "Download HTML") + App._reportDownloadLink(Config.apiBase + base + "docx" + suffix, "Download DOCX") + App._reportDownloadLink(Config.apiBase + base + "csv" + suffix, "Download CSV") + '</div></div>' +
+      '<div class="consolidated-filters"><div><label class="form-label">Scenario</label><select class="form-input" id="consolidated-scenario"><option value="">All scenarios</option>' + scenarioOptions + '</select></div><div><label class="form-label">Outcome</label><select class="form-input" id="consolidated-status"><option value="">All outcomes</option>' + ["pass","fail","error","unknown"].map(function(value) { return '<option value="'+value+'" '+(filters.status===value?'selected':'')+'>'+value.toUpperCase()+'</option>'; }).join("") + '</select></div><div><label class="form-label">From</label><input class="form-input" id="consolidated-from" type="date" value="' + escAttr(filters.date_from || "") + '"></div><div><label class="form-label">To</label><input class="form-input" id="consolidated-to" type="date" value="' + escAttr(filters.date_to || "") + '"></div><div class="management-filter-actions"><button class="btn btn-primary btn-sm" onclick="App.applyConsolidatedFilters()">Apply</button><button class="btn btn-secondary btn-sm" onclick="App.clearConsolidatedFilters()">Clear</button></div></div>';
+  },
+
+  applyConsolidatedFilters() {
+    State.consolidatedReportFilters = { scenario_id: document.getElementById("consolidated-scenario").value || "", status: document.getElementById("consolidated-status").value || "", date_from: document.getElementById("consolidated-from").value || "", date_to: document.getElementById("consolidated-to").value || "" };
+    App.loadConsolidatedReport(State.managementAgentDetail);
+  },
+  clearConsolidatedFilters() { State.consolidatedReportFilters = { scenario_id: "", status: "", date_from: "", date_to: "" }; App.loadConsolidatedReport(State.managementAgentDetail); },
+  _consolidatedSection(title, body) { return '<section class="consolidated-section"><div class="consolidated-section-title"><h2>' + escHtml(title || "Section") + '</h2></div>' + body + '</section>'; },
+  _consolidatedCard(label, value, tone) { return '<div class="consolidated-stat ' + escAttr(tone || "") + '"><span>' + escHtml(label) + '</span><strong>' + escHtml(value === null || value === undefined ? "—" : value) + '</strong></div>'; },
+  _consolidatedExecutive(x) {
+    var period=x.selected_period||{}; var periodText=(period.from?fmtDate(period.from):"—")+" to "+(period.to?fmtDate(period.to):"—");
+    return '<div class="consolidated-stat-grid">' + App._consolidatedCard("Mean Selected Run Score", x.mean_selected_run_score === null || x.mean_selected_run_score === undefined ? "—" : fmtScore(x.mean_selected_run_score), "primary") + App._consolidatedCard("Total Evaluation Runs", x.total_evaluation_runs) + App._consolidatedCard("Unique Scenarios", x.unique_scenarios) + App._consolidatedCard("Passed Runs", x.passed_runs, "pass") + App._consolidatedCard("Failed Runs", x.failed_runs, "fail") + App._consolidatedCard("Technical Errors", x.technical_errors, "warning") + App._consolidatedCard("Unknown Outcomes", x.unknown_outcomes) + App._consolidatedCard("Selected Evaluation Period",periodText) + '</div><div class="consolidated-narrative"><h3>Performance Overview</h3><p>' + escHtml(x.performance_overview || "No selected evaluation data.") + '</p></div><div class="consolidated-highlight-grid">' + [["Strongest evaluated metric",x.strongest_evaluated_metric],["Weakest evaluated metric",x.weakest_evaluated_metric],["Most frequent quality issue",x.most_frequent_quality_issue],["Technical reliability",x.technical_reliability]].filter(function(i){return i[1];}).map(function(i){return '<div><span>'+escHtml(i[0])+'</span><strong>'+escHtml(i[1])+'</strong></div>';}).join("") + '</div>';
+  },
+  _consolidatedCoverage(x) {
+    var outcomes=x.outcome_distribution||{}; var scenarios=x.scenario_coverage||[]; var warnings=x.comparability_warnings||[];
+    var metricCoverage=x.metric_coverage||[];
+    return '<div class="consolidated-stat-grid">'+App._consolidatedCard("Unique Scenarios Tested",x.unique_scenarios_tested)+App._consolidatedCard("Total Evaluation Runs",x.total_evaluation_runs)+App._consolidatedCard("Valid Scored Runs",x.valid_scored_runs)+App._consolidatedCard("Technical Error Runs",x.technical_error_runs,"warning")+App._consolidatedCard("Unknown Outcome Runs",x.unknown_outcome_runs)+'</div><h3>Outcome Distribution</h3><div class="consolidated-outcomes">'+["pass","fail","error","unknown"].map(function(k){return App._consolidatedCard(k.toUpperCase(),outcomes[k]||0,k);}).join("")+'</div><h3>Scenario Coverage</h3>'+App._consolidatedTable(["Scenario","Total Runs","Valid Runs","Technical Errors","Last Evaluated"],scenarios.map(function(i){return [i.scenario_id,i.total_runs,i.valid_runs,i.technical_errors,i.last_evaluated?fmtDate(i.last_evaluated):"—"];}))+'<h3>Metric Coverage</h3>'+App._consolidatedTable(["Metric","Evaluated","NOT EVALUATED","ERROR","Coverage"],metricCoverage.map(function(i){return [i.name,i.evaluated_count,i.not_evaluated_count,i.error_count,i.coverage];}))+'<h3>Comparability</h3>'+(warnings.length?'<div class="consolidated-warnings">'+warnings.map(function(w){return '<p>'+Icon.alert+' '+escHtml(w)+'</p>';}).join("")+'</div>':'<p class="text-muted">No comparability warning was persisted.</p>');
+  },
+  _consolidatedMetrics(items) { return App._consolidatedTable(["Metric","Average","Evaluated","Pass","Fail","NOT EVALUATED","ERROR","Coverage"],items.map(function(i){return [i.name,i.average_score===null?"—":fmtScore(i.average_score),i.evaluated_count,i.pass_count,i.fail_count,i.not_evaluated_count,i.error_count,i.coverage];})); },
+  _consolidatedScenarios(items) { return items.length ? App._consolidatedTable(["Scenario","Runs","Valid","Errors","Latest Valid Evaluation","Score","Outcome","Last Evaluated","Report"],items.map(function(i){return [i.scenario_id,i.total_runs,i.valid_runs,i.technical_errors,i.latest_valid_evaluation_id||"—",i.latest_valid_score===null?"—":fmtScore(i.latest_valid_score),(i.latest_valid_outcome||"—").toUpperCase(),i.last_evaluated?fmtDate(i.last_evaluated):"—",i.latest_valid_evaluation_id?'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.latest_valid_evaluation_id)+'">'+Icon.eye+' View Report</button>':"—"];}), true) : App._emptyStateHtml(Icon.doc,"No evaluations match this selection.","Adjust the report filters."); },
+  _consolidatedIssues(items) { if(!items.length)return '<p class="text-muted">No persisted critical failure evidence is available for this selection.</p>'; return '<div class="consolidated-issues">'+items.map(function(i){return '<article class="consolidated-issue '+(i.technical?'technical':'quality')+'"><div><span>'+(i.technical?'Technical Error':escHtml(i.metric||i.category))+'</span><strong>'+escHtml(i.scenario_id||"Unknown")+'</strong></div><p>'+escHtml(i.evidence||"Evidence available in the individual report.")+'</p><button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.evaluation_id)+'">'+Icon.eye+' '+escHtml(i.evaluation_id)+'</button></article>';}).join("")+'</div>'; },
+  _consolidatedRecommendations(items) { return items.length?'<div class="consolidated-recommendations">'+items.map(function(i){return '<article><span class="badge badge-'+(i.priority==="High"?'fail':'warning')+'">'+escHtml(i.priority)+'</span><h3>'+escHtml(i.trigger)+'</h3><p>'+escHtml(i.recommendation)+'</p><small>Scenarios: '+escHtml((i.affected_scenarios||[]).join(", ")||"—")+' · Evidence: '+escHtml((i.evaluation_ids||[]).join(", ")||"—")+'</small></article>';}).join("")+'</div>':'<p class="text-muted">No evidence-backed recommendations were generated.</p>'; },
+  _consolidatedHistory(x) { if(x.status==="comparable")return '<div class="consolidated-stat-grid">'+App._consolidatedCard("Previous Batch",x.previous_batch)+App._consolidatedCard("Current Batch",x.current_batch)+App._consolidatedCard("Previous Mean",x.previous_mean_score===null?"—":fmtScore(x.previous_mean_score))+App._consolidatedCard("Current Mean",x.current_mean_score===null?"—":fmtScore(x.current_mean_score))+App._consolidatedCard("Mean Change",x.mean_score_change===null?"—":fmtScore(x.mean_score_change))+'</div>'+App._consolidatedTable(["Metric","Previous","Current","Change"],(x.metric_changes||[]).map(function(i){return [i.metric,fmtScore(i.previous),fmtScore(i.current),fmtScore(i.change)];})); return '<div class="consolidated-history"><h3>'+escHtml(x.message||"Insufficient comparable evaluation history")+'</h3><ul>'+(x.reasons||[]).map(function(r){return '<li>'+escHtml(r)+'</li>';}).join("")+'</ul></div>'; },
+  _consolidatedReferences(items) { return items.length?App._consolidatedTable(["Scenario","Evaluation ID","Timestamp","Outcome","Score","Technical Status","Report"],items.map(function(i){return [i.scenario_id,i.evaluation_id,i.timestamp?fmtDate(i.timestamp):"—",i.outcome.toUpperCase(),i.score===null?"—":fmtScore(i.score),i.technical_status,'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.evaluation_id)+'">'+Icon.eye+' View Report</button>'];}),true):'<p class="text-muted">No included evaluation runs.</p>'; },
+  _consolidatedTable(headers, rows, trustedLast) { return '<div class="table-wrapper"><table class="consolidated-table"><thead><tr>'+headers.map(function(h){return '<th>'+escHtml(h)+'</th>';}).join("")+'</tr></thead><tbody>'+rows.map(function(row){return '<tr>'+row.map(function(value,index){return '<td>'+((trustedLast&&index===row.length-1)?value:escHtml(value===null||value===undefined?"—":value))+'</td>';}).join("")+'</tr>';}).join("")+'</tbody></table></div>'; },
 
   /* ══════════════════════════════════════════════════════════
      CONNECTIONS PAGE
@@ -2036,12 +2493,14 @@ var App = window.App = {
 
     // Metrics count
     if (ev.metrics && ev.metrics.length) {
-      var mPassed = ev.metrics.filter(m => m.passed).length;
-      var mFailed = ev.metrics.filter(m => !m.passed).length;
+      var mPassed = ev.metrics.filter(m => !["not_evaluated", "error"].includes(m.evaluation_status) && m.passed === true).length;
+      var mFailed = ev.metrics.filter(m => !["not_evaluated", "error"].includes(m.evaluation_status) && m.passed === false).length;
+      var mNotEvaluated = ev.metrics.filter(m => m.evaluation_status === "not_evaluated").length;
+      var mErrors = ev.metrics.filter(m => m.evaluation_status === "error").length;
       html += '<div class="summary-card">' +
         '<div class="summary-card-label">Metrics</div>' +
         '<div class="summary-card-value score-brand">' + ev.metrics.length + '</div>' +
-        '<div class="summary-card-sub">' + mPassed + ' passed · ' + mFailed + ' failed</div>' +
+        '<div class="summary-card-sub">' + mPassed + ' passed · ' + mFailed + ' failed' + (mNotEvaluated ? ' · ' + mNotEvaluated + ' not evaluated' : '') + (mErrors ? ' · ' + mErrors + ' errors' : '') + '</div>' +
         '</div>';
     }
 
@@ -2633,6 +3092,7 @@ var App = window.App = {
       return;
     }
     try {
+      State.reportReturnPage = (State.currentPage === "consolidated-report" || State.currentPage === "agent-details") ? State.currentPage : (State.reportReturnPage || "eval-details");
       var report = await API.getEvaluationReport(ev.evaluation_id);
       State.currentEval = ev;
       State.currentReport = report;
@@ -2683,7 +3143,7 @@ var App = window.App = {
     var score = scorecard.overall_score_display || (scorecard.overall && scorecard.overall.display) || fmtScore(scorecard.overall_score || header.overall_score);
 
     var html = '<div class="eval-back-bar professional-report-nav">' +
-      '<button class="btn btn-ghost btn-sm" onclick="App.navigate(\'eval-details\')">' + Icon.back + ' Back to Dashboard</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="App.returnFromProfessionalReport()">' + Icon.back + ' Back</button>' +
       '<span class="sep">|</span><span class="label">Professional Assessment Report</span>' +
       '<div class="report-download-actions">' +
         App._reportDownloadButton({ evaluation_id: evalId }, "executive/pdf", "Executive PDF") +
@@ -3100,12 +3560,17 @@ var App = window.App = {
     return '<div class="findings-grid"><div><h3>Findings</h3>' + findings + '</div><div><h3>Risks</h3>' + risks + '</div><div><h3>Recommendations</h3><ul>' + recs + '</ul></div></div>';
   },
 
+  _reportDownloadLink(url, label) {
+    if (!url) return "";
+    return '<a class="btn btn-secondary btn-sm" href="' + escAttr(url) + '" target="_blank" rel="noopener" download>' + escHtml(label) + '</a>';
+  },
+
   _reportDownloadButton(ev, format, label) {
     if (!ev || !ev.evaluation_id) {
       return '<button class="btn btn-secondary btn-sm" disabled>' + escHtml(label) + '</button>';
     }
     var url = Config.apiBase + "/evaluations/" + encodeURIComponent(ev.evaluation_id) + "/report/" + format;
-    return '<a class="btn btn-secondary btn-sm" href="' + escAttr(url) + '" target="_blank" rel="noopener" download>' + escHtml(label) + '</a>';
+    return App._reportDownloadLink(url, label);
   },
 
   _renderReportArtifacts(ev) {
@@ -3665,11 +4130,14 @@ var App = window.App = {
 
   /* ── Shared metric card renderer ─────────────────────────── */
   _renderMetricCard(m, ev) {
-    var pf  = m.passed ? "pass" : "fail";
-    var pct = (m.score * 100).toFixed(1);
-    var failure = !m.passed ? App._findFailureAnalysis(ev, m) : null;
+    var notEvaluated = m.evaluation_status === "not_evaluated";
+    var metricError = m.evaluation_status === "error";
+    var pf  = (notEvaluated || metricError) ? "neutral" : (m.passed ? "pass" : "fail");
+    var scoreAvailable = !notEvaluated && !metricError;
+    var pct = scoreAvailable ? (m.score * 100).toFixed(1) : "0";
+    var failure = !notEvaluated && !metricError && !m.passed ? App._findFailureAnalysis(ev, m) : null;
     var action = "";
-    if (!m.passed) {
+    if (!notEvaluated && !metricError && !m.passed) {
       if (failure) {
         action = '<button class="failure-analysis-link" type="button" onclick="App.openFailureAnalysis(\'' + escAttr(m.name || "") + '\')">View Analysis →</button>';
       } else {
@@ -3680,8 +4148,8 @@ var App = window.App = {
       '<div class="metric-header">' +
         '<span class="metric-name">' + escHtml(m.name) + '</span>' +
         '<div class="metric-right">' +
-          '<span class="metric-score">' + fmtScore(m.score) + '</span>' +
-          passFailBadge(m.passed) +
+          '<span class="metric-score">' + (scoreAvailable ? fmtScore(m.score) : "N/A") + '</span>' +
+          (notEvaluated ? '<span class="badge badge-gray">NOT EVALUATED</span>' : (metricError ? '<span class="badge badge-warning">ERROR</span>' : passFailBadge(m.passed))) +
         '</div>' +
       '</div>' +
       (m.description ? '<div class="metric-description">' + escHtml(m.description) + '</div>' : '') +

@@ -4,8 +4,8 @@ from app.models.connection import AgentConnection, AgentType
 from app.connections.storage import ConnectionRepository
 from app.config import settings
 
-def test_persistence_generic():
-    # Use the test db path or the actual configured one for tests
+def test_persistence_generic(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "db_path", str(tmp_path / "connection_persistence.db"))
     repo = ConnectionRepository()
     
     # 1. Create a REST connection

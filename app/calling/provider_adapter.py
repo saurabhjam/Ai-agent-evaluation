@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import time
 from typing import Any, Optional
 
 from app.calling.models import CallEvent, CallRecording, CallSession, CallStatus, RawCallTranscript
@@ -79,6 +80,35 @@ class CallProviderAdapter(ABC):
     def get_call_status(self, session: CallSession) -> CallStatus:
         """Return the latest vendor-neutral status for a call session."""
         ...
+
+    def wait_for_completion(
+        self,
+        session: CallSession,
+        *,
+        timeout_seconds: float = 10,
+        poll_interval_seconds: float = 1,
+    ) -> CallSession:
+        """Wait for a terminal provider-neutral session status."""
+        terminal_statuses = {
+            CallStatus.completed,
+            CallStatus.failed,
+            CallStatus.busy,
+            CallStatus.no_answer,
+            CallStatus.canceled,
+            CallStatus.cancelled,
+            CallStatus.timed_out,
+            CallStatus.disconnected,
+            CallStatus.error,
+        }
+        deadline = time.monotonic() + timeout_seconds
+        current = session
+        while time.monotonic() < deadline:
+            status = self.get_call_status(current)
+            current = current.model_copy(update={"status": status})
+            if status in terminal_statuses:
+                return current
+            time.sleep(max(poll_interval_seconds, 0.1))
+        return current.model_copy(update={"status": CallStatus.timed_out})
 
     @abstractmethod
     def end_call(self, session: CallSession) -> CallSession:

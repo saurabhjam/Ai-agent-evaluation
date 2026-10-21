@@ -20,6 +20,7 @@ from app.calling.models import CallDirection
 from app.evaluation_service import EvaluationResult
 from app.evaluation_store import new_evaluation_id, save_evaluation_report
 from app.schemas import TestScenario
+from app.calling import diagnostics
 
 
 router = APIRouter(prefix="/calling", tags=["AI Calling"])
@@ -240,7 +241,9 @@ def _load_scenario(path_value: str) -> TestScenario:
         if root not in resolved.parents and resolved != root:
             raise ValueError("Scenario path must stay inside the project")
         with resolved.open("r", encoding="utf-8") as handle:
-            return TestScenario(**yaml.safe_load(handle))
+            from app.calling.scenario import CallingScenario
+
+            return CallingScenario(**yaml.safe_load(handle))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Scenario not found") from exc
     except Exception as exc:
@@ -399,7 +402,7 @@ def _persist_calling_response(
     session = execution.call_session if execution else None
     payload.update(
         {
-            "evaluation_id": response.evaluation_id or new_evaluation_id(),
+            "evaluation_id": response.evaluation_id or diagnostics.evaluation_id() or new_evaluation_id(),
             "agent_id": response.connection_id,
             "agent_type": "calling",
             "adapter": response.provider,
@@ -516,6 +519,7 @@ def test_calling_connection(connection_id: str) -> CallingConnectionTestResult:
 
 
 @router.post("/connections/{connection_id}/run", response_model=CallingRunResponse)
+@diagnostics.traced_evaluation
 def run_calling_evaluation(connection_id: str, payload: CallingRunRequest) -> CallingRunResponse:
     raw = _load_store().get(connection_id)
     if not raw:

@@ -8,6 +8,7 @@ requests==2.32.3
 pyyaml==6.0.2
 python-dotenv==1.0.1
 groq
+cryptography
 sounddevice
 numpy
 faster-whisper

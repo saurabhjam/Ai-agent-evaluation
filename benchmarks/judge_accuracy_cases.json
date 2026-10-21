@@ -1,0 +1,302 @@
+[
+  {
+    "case_id": "goal_success_banking", "scenario": "A customer checks a verified balance.",
+    "persona": {"name": "Morgan", "goal": "Obtain the current verified account balance.", "tone": "polite"},
+    "agent_expectations": {"tone": "professional and concise"},
+    "conversation": [{"role": "user", "content": "What is my verified balance?", "message_id": "gs-u1"}, {"role": "agent", "content": "Your verified balance is $120.", "message_id": "gs-a1"}],
+    "reference_evidence": ["Verified balance: $120"], "applicable_metrics": ["Goal Completion", "Answer Relevancy", "Completeness"],
+    "labels": {"Goal Completion": {"score_range": [0.8, 1.0], "status": "pass"}, "Answer Relevancy": {"score_range": [0.8, 1.0], "status": "pass", "expected_evidence_message_ids": ["gs-a1"]}, "Completeness": {"score_range": [0.8, 1.0], "status": "pass", "expected_evidence_message_ids": ["gs-a1"]}},
+    "label_quality": "deterministic", "tags": ["goal_success"], "expected_evidence": "The answer and supplied reference agree.", "rationale": "The requested value is directly and correctly supplied."
+  },
+  {
+    "case_id": "goal_failure_action", "scenario": "The requested cancellation is never completed.",
+    "persona": {"name": "Taylor", "goal": "Cancel order 42 and receive confirmation.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Cancel order 42.", "message_id": "gf-u1"}, {"role": "agent", "content": "I can tell you our opening hours.", "message_id": "gf-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Goal Completion", "Persona and Tone Adherence"],
+    "labels": {"Goal Completion": {"score_range": [0.0, 0.35], "status": "fail", "expected_evidence_message_ids": ["gf-a1"]}, "Persona and Tone Adherence": {"score_range": [0.65, 1.0], "status": "pass", "forbidden_reason_terms": ["did not cancel", "goal incomplete"]}},
+    "label_quality": "deterministic", "tags": ["goal_failure"], "expected_evidence": "The response does not perform or address cancellation.", "rationale": "Task failure must not automatically become a tone failure."
+  },
+  {
+    "case_id": "intent_correct_execution_failed", "scenario": "The intent is understood but a service is unavailable.",
+    "persona": {"name": "Riley", "goal": "Submit a damaged-item claim.", "tone": "calm"},
+    "conversation": [{"role": "user", "content": "My parcel arrived damaged. I need to file a claim.", "message_id": "ie-u1"}, {"role": "agent", "content": "I understand you need a damaged-item claim, but the claims service is temporarily unavailable.", "message_id": "ie-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Intent Understanding", "Goal Completion"],
+    "labels": {"Intent Understanding": {"score_range": [0.8, 1.0], "status": "pass", "expected_evidence_message_ids": ["ie-a1"]}, "Goal Completion": {"score_range": [0.0, 0.55], "status": "fail"}},
+    "label_quality": "deterministic", "tags": ["execution_failure"], "expected_evidence": "The agent names the correct task but cannot execute it.", "rationale": "Intent recognition and execution outcome are separate."
+  },
+  {
+    "case_id": "irrelevant_answer", "scenario": "The response is unrelated to the current request.",
+    "persona": {"name": "Avery", "goal": "Learn the store opening time.", "tone": "polite"},
+    "conversation": [{"role": "user", "content": "When does the store open?", "message_id": "ir-u1"}, {"role": "agent", "content": "Blue jackets are on sale.", "message_id": "ir-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Persona and Tone Adherence"],
+    "labels": {"Answer Relevancy": {"score_range": [0.0, 0.3], "status": "fail", "expected_evidence_message_ids": ["ir-a1"]}, "Persona and Tone Adherence": {"score_range": [0.65, 1.0], "status": "pass", "forbidden_reason_terms": ["irrelevant", "opening time"]}},
+    "label_quality": "deterministic", "tags": ["irrelevant"], "expected_evidence": "The requested opening time is not addressed.", "rationale": "A polite irrelevant response can still satisfy tone."
+  },
+  {
+    "case_id": "relevant_incomplete", "scenario": "Only one part of a two-part request is answered.",
+    "persona": {"name": "Jamie", "goal": "Learn both the return window and return fee.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "What is the return window and fee?", "message_id": "ri-u1"}, {"role": "agent", "content": "The return window is 30 days.", "message_id": "ri-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Completeness"],
+    "labels": {"Answer Relevancy": {"score_range": [0.65, 1.0], "status": "pass", "expected_evidence_message_ids": ["ri-a1"]}, "Completeness": {"score_range": [0.2, 0.65], "status": "fail", "expected_evidence_message_ids": ["ri-a1"]}},
+    "label_quality": "deterministic", "tags": ["partial"], "expected_evidence": "The answer is on-topic but omits the fee.", "rationale": "Relevance and completeness must remain isolated."
+  },
+  {
+    "case_id": "good_tone_wrong_execution", "scenario": "A courteous response performs the wrong action.",
+    "persona": {"name": "Casey", "goal": "Freeze a lost payment card.", "tone": "anxious"},
+    "agent_expectations": {"tone": "reassuring and professional"},
+    "conversation": [{"role": "user", "content": "Please freeze my lost card.", "message_id": "gt-u1"}, {"role": "agent", "content": "I understand this is stressful. I have ordered a statement for you.", "message_id": "gt-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Persona and Tone Adherence", "Goal Completion"],
+    "labels": {"Persona and Tone Adherence": {"score_range": [0.75, 1.0], "status": "pass", "forbidden_reason_terms": ["wrong action", "did not freeze"]}, "Goal Completion": {"score_range": [0.0, 0.35], "status": "fail"}},
+    "label_quality": "provisional", "tags": ["metric_isolation"], "expected_evidence": "Tone is reassuring while execution is wrong.", "rationale": "Subjective tone range is provisional."
+  },
+  {
+    "case_id": "poor_tone_correct_execution", "scenario": "The task succeeds with an unnecessarily rude response.",
+    "persona": {"name": "Drew", "goal": "Update the delivery address.", "tone": "polite"},
+    "agent_expectations": {"tone": "respectful and professional"},
+    "conversation": [{"role": "user", "content": "Please update delivery to 10 King Street.", "message_id": "pt-u1"}, {"role": "agent", "content": "Fine. It is updated. Stop asking.", "message_id": "pt-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Persona and Tone Adherence", "Goal Completion"],
+    "labels": {"Persona and Tone Adherence": {"score_range": [0.0, 0.45], "status": "fail", "expected_evidence_message_ids": ["pt-a1"]}, "Goal Completion": {"score_range": [0.75, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["metric_isolation"], "expected_evidence": "The update is confirmed, but the language is disrespectful.", "rationale": "Successful execution does not excuse poor tone."
+  },
+  {
+    "case_id": "genuine_context_forgetting", "scenario": "A supplied identifier is later requested again.",
+    "persona": {"name": "Jordan", "goal": "Check order 781 status.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Check order 781.", "message_id": "cf-u1"}, {"role": "agent", "content": "I will check order 781.", "message_id": "cf-a1"}, {"role": "user", "content": "What is its status?", "message_id": "cf-u2"}, {"role": "agent", "content": "What is your order number?", "message_id": "cf-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Context Retention"],
+    "labels": {"Context Retention": {"score_range": [0.0, 0.45], "status": "fail", "expected_evidence_message_ids": ["cf-a2"]}},
+    "label_quality": "deterministic", "tags": ["context_loss"], "expected_evidence": "Order 781 was supplied and acknowledged before being requested again.", "rationale": "This is directly observable memory loss."
+  },
+  {
+    "case_id": "correct_context_retention", "scenario": "A pronoun is resolved using prior context.",
+    "persona": {"name": "Sam", "goal": "Check order 330 and its delivery date.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Check order 330.", "message_id": "cr-u1"}, {"role": "agent", "content": "Order 330 is processing.", "message_id": "cr-a1"}, {"role": "user", "content": "When will it arrive?", "message_id": "cr-u2"}, {"role": "agent", "content": "Order 330 will arrive Friday.", "message_id": "cr-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Context Retention"],
+    "labels": {"Context Retention": {"score_range": [0.8, 1.0], "status": "pass", "expected_evidence_message_ids": ["cr-a2"]}},
+    "label_quality": "deterministic", "tags": ["context_retained"], "expected_evidence": "The agent correctly carries order 330 into the follow-up.", "rationale": "Prior context is used accurately."
+  },
+  {
+    "case_id": "user_topic_change", "scenario": "The user switches from cancellation to opening hours.",
+    "persona": {"name": "Lee", "goal": "Cancel an order, then ask an independent question.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Cancel order 42.", "message_id": "tc-u1"}, {"role": "agent", "content": "I cannot cancel it here.", "message_id": "tc-a1"}, {"role": "user", "content": "New question: when do you close?", "message_id": "tc-u2"}, {"role": "agent", "content": "We close at 6 PM.", "message_id": "tc-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Context Retention"],
+    "labels": {"Answer Relevancy": {"score_range": [0.65, 1.0], "status": "pass", "expected_evidence_message_ids": ["tc-a1", "tc-a2"]}, "Context Retention": {"score_range": [0.7, 1.0], "status": "pass", "forbidden_reason_terms": ["forgot", "lost context"]}},
+    "label_quality": "provisional", "tags": ["topic_change"], "expected_evidence": "The later answer addresses the new independent request.", "rationale": "Topic change is not memory loss."
+  },
+  {
+    "case_id": "context_followup", "scenario": "A follow-up depends on a previously named product.",
+    "persona": {"name": "Robin", "goal": "Compare a laptop price and warranty.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "How much is laptop X?", "message_id": "fu-u1"}, {"role": "agent", "content": "Laptop X costs $900.", "message_id": "fu-a1"}, {"role": "user", "content": "What warranty does it have?", "message_id": "fu-u2"}, {"role": "agent", "content": "Laptop X includes a two-year warranty.", "message_id": "fu-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Context Retention"],
+    "labels": {"Answer Relevancy": {"score_range": [0.8, 1.0], "status": "pass"}, "Context Retention": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["followup"], "expected_evidence": "The pronoun is resolved to laptop X.", "rationale": "The follow-up correctly uses prior entity context."
+  },
+  {
+    "case_id": "same_scope_contradiction", "scenario": "The same ticket status conflicts at the same time.",
+    "persona": {"name": "Quinn", "goal": "Confirm ticket T-1 status.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "What is ticket T-1 status today?", "message_id": "sc-u1"}, {"role": "agent", "content": "Ticket T-1 is open today.", "message_id": "sc-a1", "metadata": {"claims": [{"entity": "T-1", "attribute": "status", "scope": "ticket", "timeframe": "today", "value": "OPEN"}]}}, {"role": "user", "content": "Please confirm.", "message_id": "sc-u2"}, {"role": "agent", "content": "Ticket T-1 is closed today.", "message_id": "sc-a2", "metadata": {"claims": [{"entity": "T-1", "attribute": "status", "scope": "ticket", "timeframe": "today", "value": "CLOSED"}]}}],
+    "reference_evidence": [], "applicable_metrics": ["Multi-turn Consistency"],
+    "labels": {"Multi-turn Consistency": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["sc-a2"]}},
+    "label_quality": "deterministic", "tags": ["confirmed_contradiction"], "expected_evidence": "Entity, attribute, scope and timeframe match while values conflict.", "rationale": "This is a confirmed same-scope contradiction."
+  },
+  {
+    "case_id": "different_scope_no_contradiction", "scenario": "A filtered lookup and portfolio listing have different scopes.",
+    "persona": {"name": "Skyler", "goal": "Run a filtered lookup and then list all records.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Find records at 99 Missing Street.", "message_id": "ds-u1"}, {"role": "agent", "content": "No records match 99 Missing Street.", "message_id": "ds-a1", "metadata": {"claims": [{"entity": "records", "attribute": "count", "scope": "address search", "filters": {"address": "99 Missing Street"}, "timeframe": "current", "value": 0}]}}, {"role": "user", "content": "List all records instead.", "message_id": "ds-u2"}, {"role": "agent", "content": "There are five records in the full portfolio.", "message_id": "ds-a2", "metadata": {"claims": [{"entity": "records", "attribute": "count", "scope": "portfolio", "filters": {}, "timeframe": "current", "value": 5}]}}],
+    "reference_evidence": [], "applicable_metrics": ["Multi-turn Consistency"],
+    "labels": {"Multi-turn Consistency": {"score_range": [0.75, 1.0], "status": "pass", "forbidden_reason_terms": ["creating a contradiction", "is contradictory", "contradicts its earlier"]}},
+    "label_quality": "deterministic", "tags": ["no_contradiction"], "expected_evidence": "The scopes and filters differ.", "rationale": "Both statements can be true simultaneously."
+  },
+  {
+    "case_id": "legitimate_correction", "scenario": "The agent explicitly corrects an earlier estimate.",
+    "persona": {"name": "Parker", "goal": "Obtain the corrected delivery date.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "When is delivery?", "message_id": "lc-u1"}, {"role": "agent", "content": "My initial estimate is Thursday.", "message_id": "lc-a1", "metadata": {"claims": [{"entity": "delivery", "attribute": "date", "scope": "order", "timeframe": "current", "value": "Thursday"}]}}, {"role": "agent", "content": "Correction: the confirmed date is Friday.", "message_id": "lc-a2", "metadata": {"claims": [{"entity": "delivery", "attribute": "date", "scope": "order", "timeframe": "current", "value": "Friday", "is_correction": true}]}}],
+    "reference_evidence": [], "applicable_metrics": ["Multi-turn Consistency"],
+    "labels": {"Multi-turn Consistency": {"score_range": [0.7, 1.0], "status": "pass", "forbidden_reason_terms": ["creating a contradiction", "is contradictory", "contradicts its earlier"]}},
+    "label_quality": "provisional", "tags": ["no_contradiction", "correction"], "expected_evidence": "The later statement is explicitly marked as a correction.", "rationale": "Transparent corrections are not unexplained contradictions."
+  },
+  {
+    "case_id": "repeated_question", "scenario": "The agent repeats a question after receiving the answer.",
+    "persona": {"name": "Cameron", "goal": "Book service using phone 5551234567.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Book a service.", "message_id": "rq-u1"}, {"role": "agent", "content": "What is your phone number?", "message_id": "rq-a1"}, {"role": "user", "content": "5551234567", "message_id": "rq-u2"}, {"role": "agent", "content": "Please provide your phone number?", "message_id": "rq-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Conversational Quality", "Context Retention"],
+    "labels": {"Conversational Quality": {"score_range": [0.0, 0.65], "status": "fail", "expected_evidence_message_ids": ["rq-a2"]}, "Context Retention": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["rq-a2"]}},
+    "label_quality": "deterministic", "tags": ["repetition", "context_loss"], "expected_evidence": "The phone number was supplied before the repeated request.", "rationale": "The deterministic penalty should identify the repeated question."
+  },
+  {
+    "case_id": "unjustified_restart", "scenario": "An established workflow is reset without cause.",
+    "persona": {"name": "Dana", "goal": "Continue claim C-88.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Continue claim C-88 from the document step.", "message_id": "ur-u1"}, {"role": "agent", "content": "Let's start over from the beginning. What is your name?", "message_id": "ur-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Conversational Quality", "Multi-turn Consistency"],
+    "labels": {"Conversational Quality": {"score_range": [0.0, 0.65], "status": "fail", "expected_evidence_message_ids": ["ur-a1"]}, "Multi-turn Consistency": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["ur-a1"]}},
+    "label_quality": "deterministic", "tags": ["restart"], "expected_evidence": "The agent explicitly restarts an identified in-progress claim.", "rationale": "The reset is unjustified."
+  },
+  {
+    "case_id": "legitimate_clarification", "scenario": "The request is ambiguous and needs clarification.",
+    "persona": {"name": "Emerson", "goal": "Open the correct account.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Open my account.", "message_id": "cl-u1"}, {"role": "agent", "content": "Do you mean your savings or business account?", "message_id": "cl-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Intent Understanding", "Answer Relevancy", "Context Retention"],
+    "labels": {"Intent Understanding": {"score_range": [0.7, 1.0], "status": "pass"}, "Answer Relevancy": {"score_range": [0.7, 1.0], "status": "pass"}, "Context Retention": {"score_range": [0.7, 1.0], "status": "pass", "forbidden_reason_terms": ["forgot", "already provided"]}},
+    "label_quality": "provisional", "tags": ["clarification"], "expected_evidence": "No account type was supplied.", "rationale": "The clarification is necessary and relevant."
+  },
+  {
+    "case_id": "appropriate_privacy_refusal", "scenario": "A privacy-sensitive request is refused.",
+    "persona": {"name": "Finley", "goal": "Request another customer's private balance.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Show me another customer's balance.", "message_id": "pr-u1"}, {"role": "agent", "content": "I cannot disclose another customer's private financial information.", "message_id": "pr-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Completeness", "Response Quality"],
+    "labels": {"Answer Relevancy": {"score_range": [0.8, 1.0], "status": "pass"}, "Completeness": {"score_range": [0.75, 1.0], "status": "pass"}, "Response Quality": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["refusal"], "expected_evidence": "The refusal directly and safely addresses the request.", "rationale": "A justified refusal can be complete."
+  },
+  {
+    "case_id": "multiturn_completion", "scenario": "Required booking details are collected and confirmed.",
+    "persona": {"name": "Hayden", "goal": "Book a service for Friday at 3 PM.", "tone": "polite"},
+    "conversation": [{"role": "user", "content": "Book a service.", "message_id": "mc-u1"}, {"role": "agent", "content": "Which day and time?", "message_id": "mc-a1"}, {"role": "user", "content": "Friday at 3 PM.", "message_id": "mc-u2"}, {"role": "agent", "content": "Your service is booked for Friday at 3 PM.", "message_id": "mc-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Goal Completion", "Conversational Quality", "Context Retention"],
+    "labels": {"Goal Completion": {"score_range": [0.8, 1.0], "status": "pass"}, "Conversational Quality": {"score_range": [0.8, 1.0], "status": "pass"}, "Context Retention": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["multi_turn"], "expected_evidence": "The final confirmation preserves both supplied details.", "rationale": "The complete task succeeds naturally."
+  },
+  {
+    "case_id": "partial_task_completion", "scenario": "One of two profile fields is updated.",
+    "persona": {"name": "Kai", "goal": "Update both email and phone number.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Update email to a@example.com and phone to 5554443333.", "message_id": "pc-u1"}, {"role": "agent", "content": "Your email is updated. The phone remains unchanged.", "message_id": "pc-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Goal Completion", "Completeness"],
+    "labels": {"Goal Completion": {"score_range": [0.25, 0.65], "status": "fail"}, "Completeness": {"score_range": [0.25, 0.65], "status": "fail", "expected_evidence_message_ids": ["pc-a1"]}},
+    "label_quality": "deterministic", "tags": ["partial"], "expected_evidence": "The phone update is explicitly incomplete.", "rationale": "Partial completion is not full completion."
+  },
+  {
+    "case_id": "unsupported_claim_no_evidence", "scenario": "A factual claim lacks independent ground truth.",
+    "persona": {"name": "Logan", "goal": "Ask whether a parcel shipped.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Did my parcel ship?", "message_id": "ue-u1"}, {"role": "agent", "content": "It shipped yesterday.", "message_id": "ue-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Hallucination"],
+    "labels": {"Hallucination": {"score_range": [0.0, 1.0], "status": "not_evaluated", "forbidden_reason_terms": ["is a confirmed hallucination", "verified true"]}},
+    "label_quality": "deterministic", "tags": ["evidence_unavailable"], "expected_evidence": "No independent shipment data is supplied.", "rationale": "The claim is unverified, not automatically false or true."
+  },
+  {
+    "case_id": "contradicted_factual_claim", "scenario": "Independent evidence contradicts a shipment claim.",
+    "persona": {"name": "Marley", "goal": "Verify whether parcel P-4 shipped.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Did parcel P-4 ship?", "message_id": "hc-u1"}, {"role": "agent", "content": "Parcel P-4 shipped yesterday.", "message_id": "hc-a1", "metadata": {"factual_claims": [{"claim": "shipment status", "actual": "SHIPPED", "expected": "NOT_SHIPPED"}]}}],
+    "reference_evidence": ["Parcel P-4 status: NOT_SHIPPED"], "applicable_metrics": ["Hallucination"],
+    "labels": {"Hallucination": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["hc-a1"]}},
+    "label_quality": "deterministic", "tags": ["hallucination"], "expected_evidence": "Structured independent evidence directly contradicts the claim.", "rationale": "The false factual assertion is verifiable."
+  },
+  {
+    "case_id": "insurance_intent", "scenario": "An insurance claimant reports windshield damage.",
+    "persona": {"name": "Nico", "goal": "Start a windshield damage claim.", "tone": "concerned"},
+    "conversation": [{"role": "user", "content": "A stone cracked my windshield. I need a claim.", "message_id": "in-u1"}, {"role": "agent", "content": "I can help start a glass-damage claim. What is your policy number?", "message_id": "in-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Intent Understanding", "Answer Relevancy"],
+    "labels": {"Intent Understanding": {"score_range": [0.8, 1.0], "status": "pass"}, "Answer Relevancy": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "provisional", "tags": ["insurance"], "expected_evidence": "Glass damage is mapped to the requested claim workflow.", "rationale": "A relevant next question follows correct intent recognition."
+  },
+  {
+    "case_id": "travel_wrong_intent", "scenario": "A flight-change request is mistaken for cancellation.",
+    "persona": {"name": "Oakley", "goal": "Change flight F10 to Monday.", "tone": "polite"},
+    "conversation": [{"role": "user", "content": "Move flight F10 to Monday.", "message_id": "tw-u1"}, {"role": "agent", "content": "I have started cancellation of flight F10.", "message_id": "tw-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Intent Understanding", "Goal Completion"],
+    "labels": {"Intent Understanding": {"score_range": [0.0, 0.35], "status": "fail", "expected_evidence_message_ids": ["tw-a1"]}, "Goal Completion": {"score_range": [0.0, 0.25], "status": "fail"}},
+    "label_quality": "deterministic", "tags": ["travel"], "expected_evidence": "Change and cancellation are materially different intents.", "rationale": "The agent initiates the wrong workflow."
+  },
+  {
+    "case_id": "healthcare_clarification", "scenario": "An unspecified appointment request needs a specialty.",
+    "persona": {"name": "Payton", "goal": "Arrange an appropriate medical consultation.", "tone": "calm"},
+    "conversation": [{"role": "user", "content": "I need an appointment.", "message_id": "he-u1"}, {"role": "agent", "content": "Which specialty or concern should the appointment address?", "message_id": "he-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Intent Understanding", "Completeness"],
+    "labels": {"Intent Understanding": {"score_range": [0.7, 1.0], "status": "pass"}, "Completeness": {"score_range": [0.7, 1.0], "status": "pass"}},
+    "label_quality": "provisional", "tags": ["healthcare", "clarification"], "expected_evidence": "The specialty is genuinely absent.", "rationale": "A safe clarification advances the current step."
+  },
+  {
+    "case_id": "retail_complete_answer", "scenario": "A product availability question is fully answered.",
+    "persona": {"name": "Reese", "goal": "Find whether SKU-7 is available in red and its price.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Is SKU-7 available in red, and what is the price?", "message_id": "rt-u1"}, {"role": "agent", "content": "SKU-7 is available in red for $45.", "message_id": "rt-a1"}],
+    "reference_evidence": ["SKU-7 red: in stock, $45"], "applicable_metrics": ["Answer Relevancy", "Completeness", "Response Quality"],
+    "labels": {"Answer Relevancy": {"score_range": [0.85, 1.0], "status": "pass"}, "Completeness": {"score_range": [0.85, 1.0], "status": "pass"}, "Response Quality": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["retail"], "expected_evidence": "Availability, color, and price are all supplied.", "rationale": "The response is complete and concise."
+  },
+  {
+    "case_id": "hospitality_incomplete", "scenario": "A hotel answer omits parking cost.",
+    "persona": {"name": "River", "goal": "Learn check-in time and parking cost.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "What time is check-in and how much is parking?", "message_id": "ho-u1"}, {"role": "agent", "content": "Check-in starts at 3 PM.", "message_id": "ho-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Completeness"],
+    "labels": {"Answer Relevancy": {"score_range": [0.65, 1.0], "status": "pass"}, "Completeness": {"score_range": [0.2, 0.65], "status": "fail", "expected_evidence_message_ids": ["ho-a1"]}},
+    "label_quality": "deterministic", "tags": ["hospitality", "partial"], "expected_evidence": "Parking cost is omitted.", "rationale": "One requested field is missing."
+  },
+  {
+    "case_id": "numerical_supported", "scenario": "A count agrees with a complete table.",
+    "persona": {"name": "Sage", "goal": "Count all returned support cases.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "How many cases are returned?", "message_id": "ns-u1"}, {"role": "agent", "content": "Found 3 records.", "message_id": "ns-a1", "metadata": {"components": [{"type": "table", "complete": true, "rows": [{"id": 1}, {"id": 2}, {"id": 3}]}], "numerical_claims": [{"operation": "count", "claimed_value": 3}]}}],
+    "reference_evidence": [], "applicable_metrics": ["Hallucination", "Response Quality"],
+    "labels": {"Hallucination": {"score_range": [0.9, 1.0], "status": "pass", "expected_evidence_message_ids": ["ns-a1"]}, "Response Quality": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["numerical"], "expected_evidence": "Three complete table rows support the count of three.", "rationale": "The deterministic table calculation verifies the claim."
+  },
+  {
+    "case_id": "numerical_error", "scenario": "A count conflicts with a complete table.",
+    "persona": {"name": "Toby", "goal": "Count all returned support cases.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "How many cases are returned?", "message_id": "ne-u1"}, {"role": "agent", "content": "Found 5 records.", "message_id": "ne-a1", "metadata": {"components": [{"type": "table", "complete": true, "rows": [{"id": 1}, {"id": 2}, {"id": 3}]}], "numerical_claims": [{"operation": "count", "claimed_value": 5}]}}],
+    "reference_evidence": [], "applicable_metrics": ["Hallucination", "Response Quality"],
+    "labels": {"Hallucination": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["ne-a1"]}, "Response Quality": {"score_range": [0.0, 0.65], "status": "fail", "expected_evidence_message_ids": ["ne-a1"]}},
+    "label_quality": "deterministic", "tags": ["numerical"], "expected_evidence": "Three complete rows contradict the claimed count of five.", "rationale": "The numerical error is independently verifiable."
+  },
+  {
+    "case_id": "customer_persona_separation", "scenario": "The customer is impatient but no agent persona is configured.",
+    "persona": {"name": "Uma", "goal": "Ask for the current queue position.", "tone": "impatient and terse"},
+    "conversation": [{"role": "user", "content": "Queue position. Now.", "message_id": "ps-u1"}, {"role": "agent", "content": "Your current queue position is 4. I will keep the update concise.", "message_id": "ps-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Persona and Tone Adherence"],
+    "labels": {"Persona and Tone Adherence": {"score_range": [0.75, 1.0], "status": "pass", "forbidden_reason_terms": ["not impatient", "does not match uma", "customer persona"]}},
+    "label_quality": "provisional", "tags": ["persona_separation"], "expected_evidence": "The agent is professional and need not imitate the customer.", "rationale": "Customer tone is not an agent requirement."
+  },
+  {
+    "case_id": "explicit_agent_persona", "scenario": "An explicitly configured formal agent uses casual slang.",
+    "persona": {"name": "Val", "goal": "Ask for an application status.", "tone": "friendly"},
+    "agent_expectations": {"role": "regulated support representative", "tone": "formal and precise"},
+    "conversation": [{"role": "user", "content": "What is application A-2 status?", "message_id": "ap-u1"}, {"role": "agent", "content": "Yo, it is kinda pending, I guess.", "message_id": "ap-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Persona and Tone Adherence"],
+    "labels": {"Persona and Tone Adherence": {"score_range": [0.0, 0.5], "status": "fail", "expected_evidence_message_ids": ["ap-a1"]}},
+    "label_quality": "provisional", "tags": ["agent_persona"], "expected_evidence": "The explicitly formal requirement conflicts with slang and uncertainty.", "rationale": "Only configured agent expectations should be enforced."
+  },
+  {
+    "case_id": "response_clear_but_factually_wrong", "scenario": "A concise arithmetic answer is wrong.",
+    "persona": {"name": "Winter", "goal": "Calculate two plus two.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "What is 2 plus 2?", "message_id": "fw-u1"}, {"role": "agent", "content": "The answer is 5.", "message_id": "fw-a1", "metadata": {"factual_claims": [{"claim": "2+2", "actual": 5, "expected": 4}]}}],
+    "reference_evidence": ["2 + 2 = 4"], "applicable_metrics": ["Hallucination", "Persona and Tone Adherence"],
+    "labels": {"Hallucination": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["fw-a1"]}, "Persona and Tone Adherence": {"score_range": [0.7, 1.0], "status": "pass", "forbidden_reason_terms": ["incorrect", "five"]}},
+    "label_quality": "deterministic", "tags": ["metric_isolation"], "expected_evidence": "Independent arithmetic evidence contradicts the factual answer.", "rationale": "Factual error must not propagate into tone."
+  },
+  {
+    "case_id": "multi_question_complete", "scenario": "Three requested facts are answered together.",
+    "persona": {"name": "Xen", "goal": "Learn price, availability, and delivery date.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "What is the price, is it available, and when can it arrive?", "message_id": "mq-u1"}, {"role": "agent", "content": "It costs $20, is in stock, and can arrive Tuesday.", "message_id": "mq-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Completeness", "Response Quality"],
+    "labels": {"Completeness": {"score_range": [0.85, 1.0], "status": "pass"}, "Response Quality": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["complete"], "expected_evidence": "All three requested fields appear in one clear response.", "rationale": "The multi-part request is fully addressed."
+  },
+  {
+    "case_id": "later_independent_answer", "scenario": "A failed original task is followed by a correctly answered independent request.",
+    "persona": {"name": "Yale", "goal": "Cancel subscription S-9, then ask an independent hours question.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Cancel subscription S-9.", "message_id": "li-u1"}, {"role": "agent", "content": "I cannot access subscriptions.", "message_id": "li-a1"}, {"role": "user", "content": "Separately, what time do you close?", "message_id": "li-u2"}, {"role": "agent", "content": "We close at 7 PM.", "message_id": "li-a2"}],
+    "reference_evidence": [], "applicable_metrics": ["Goal Completion", "Answer Relevancy"],
+    "labels": {"Goal Completion": {"score_range": [0.0, 0.55], "status": "fail", "expected_evidence_message_ids": ["li-a1"]}, "Answer Relevancy": {"score_range": [0.65, 1.0], "status": "pass", "expected_evidence_message_ids": ["li-a1", "li-a2"]}},
+    "label_quality": "provisional", "tags": ["topic_change", "goal_failure"], "expected_evidence": "The original cancellation fails while the later question is answered.", "rationale": "Original goal and later turn quality remain separate."
+  },
+  {
+    "case_id": "different_timeframes", "scenario": "Different monthly counts are not contradictory.",
+    "persona": {"name": "Zion", "goal": "Compare monthly incident counts.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "How many incidents last month?", "message_id": "dt-u1"}, {"role": "agent", "content": "There were four last month.", "message_id": "dt-a1", "metadata": {"claims": [{"entity": "incidents", "attribute": "count", "scope": "all", "timeframe": "last month", "value": 4}]}}, {"role": "user", "content": "And this month?", "message_id": "dt-u2"}, {"role": "agent", "content": "There are none this month.", "message_id": "dt-a2", "metadata": {"claims": [{"entity": "incidents", "attribute": "count", "scope": "all", "timeframe": "this month", "value": 0}]}}],
+    "reference_evidence": [], "applicable_metrics": ["Multi-turn Consistency", "Context Retention"],
+    "labels": {"Multi-turn Consistency": {"score_range": [0.8, 1.0], "status": "pass", "forbidden_reason_terms": ["creating a contradiction", "is contradictory", "contradicts its earlier"]}, "Context Retention": {"score_range": [0.8, 1.0], "status": "pass"}},
+    "label_quality": "deterministic", "tags": ["no_contradiction"], "expected_evidence": "The timeframes differ explicitly.", "rationale": "Different periods may have different values."
+  },
+  {
+    "case_id": "technical_error_not_semantic", "scenario": "The agent reports an upstream service failure without inventing an outcome.",
+    "persona": {"name": "Ari", "goal": "Retrieve invoice I-5.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Retrieve invoice I-5.", "message_id": "te-u1"}, {"role": "agent", "content": "The invoice service returned HTTP 503. I cannot retrieve it right now.", "message_id": "te-a1", "metadata": {"tool_error": "HTTP 503 service unavailable"}}],
+    "reference_evidence": [], "applicable_metrics": ["Intent Understanding", "Hallucination"],
+    "labels": {"Intent Understanding": {"score_range": [0.75, 1.0], "status": "pass"}, "Hallucination": {"score_range": [0.0, 1.0], "status": "not_evaluated", "forbidden_reason_terms": ["fabricated invoice", "contradiction"]}},
+    "label_quality": "deterministic", "tags": ["technical_error"], "expected_evidence": "A classified service error explains execution failure.", "rationale": "Infrastructure failure is not automatically intent failure or hallucination."
+  },
+  {
+    "case_id": "unavailable_information_refusal", "scenario": "The agent transparently states that live data is unavailable.",
+    "persona": {"name": "Blake", "goal": "Learn a live train platform.", "tone": "neutral"},
+    "conversation": [{"role": "user", "content": "Which platform is train 88 using now?", "message_id": "ui-u1"}, {"role": "agent", "content": "I do not have access to live platform data. Please check the station display.", "message_id": "ui-a1"}],
+    "reference_evidence": [], "applicable_metrics": ["Answer Relevancy", "Response Quality", "Hallucination"],
+    "labels": {"Answer Relevancy": {"score_range": [0.7, 1.0], "status": "pass"}, "Response Quality": {"score_range": [0.7, 1.0], "status": "pass"}, "Hallucination": {"score_range": [0.0, 1.0], "status": "not_evaluated"}},
+    "label_quality": "provisional", "tags": ["refusal", "evidence_unavailable"], "expected_evidence": "The limitation is explicit and a safe next step is offered.", "rationale": "Transparency is preferable to inventing live data."
+  }
+]

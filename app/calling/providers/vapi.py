@@ -6,6 +6,7 @@ import uuid
 import requests
 import os
 import logging
+import time
 from typing import Any, Optional
 
 from app.calling.config import CallingProviderConfig
@@ -71,14 +72,27 @@ class VapiProvider(CallProviderAdapter):
             raise ProviderConfigurationError("Vapi provider requires assistant_id in settings.")
 
         audio_format = self.config.settings.get("audio_format") or {}
+        silence_timeout = int(
+            self.config.settings.get("silence_timeout_seconds")
+            or self.config.settings.get("timeout_seconds")
+            or 120
+        )
+        max_duration = int(
+            self.config.settings.get("max_duration_seconds")
+            or 600
+        )
         payload = {
             "assistantId": assistant_id,
+            "assistantOverrides": {
+                "silenceTimeoutSeconds": silence_timeout,
+                "maxDurationSeconds": max_duration,
+            },
             "transport": {
                 "provider": "vapi.websocket",
                 "audioFormat": {
                     "format": audio_format.get("format") or "pcm_s16le",
                     "container": audio_format.get("container") or "raw",
-                    "sampleRate": int(audio_format.get("sampleRate") or audio_format.get("sample_rate") or 16000),
+                    "sampleRate": int(audio_format.get("sampleRate") or audio_format.get("sample_rate") or 24000),
                 },
             },
         }
@@ -166,6 +180,65 @@ class VapiProvider(CallProviderAdapter):
             return CallStatus.in_progress
         return session.status if session.status != CallStatus.created else CallStatus.in_progress
 
+    @staticmethod
+    def is_session_terminal(status: CallStatus) -> bool:
+        return status in {
+            CallStatus.completed,
+            CallStatus.failed,
+            CallStatus.busy,
+            CallStatus.no_answer,
+            CallStatus.canceled,
+            CallStatus.cancelled,
+            CallStatus.timed_out,
+            CallStatus.disconnected,
+            CallStatus.error,
+        }
+
+    def wait_for_completion(
+        self,
+        session: CallSession,
+        *,
+        timeout_seconds: Optional[float] = None,
+        poll_interval_seconds: Optional[float] = None,
+    ) -> CallSession:
+        timeout = float(
+            timeout_seconds
+            if timeout_seconds is not None
+            else self.config.settings.get("completion_timeout_seconds")
+            or self.config.settings.get("artifact_timeout_seconds")
+            or 60
+        )
+        interval = float(
+            poll_interval_seconds
+            if poll_interval_seconds is not None
+            else self.config.settings.get("completion_poll_interval_seconds")
+            or 1
+        )
+        deadline = time.monotonic() + timeout
+        current = session
+        last_body: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            body = self._fetch_call(current, allow_initial=False, use_cache=False)
+            last_body = body
+            status = self._status_from_body(body, fallback=current.status)
+            current = self._session_from_body(current, body, status=status)
+            logger.info(
+                "Vapi completion poll call_id=%s status=%s transcript_ready=%s recording_ready=%s",
+                current.provider_call_id,
+                status.value,
+                bool(_transcript_turns_from_vapi_call(body)),
+                _has_vapi_recording(body),
+            )
+            if self.is_session_terminal(status) and status != CallStatus.completed:
+                return current
+            if status == CallStatus.completed and self._artifacts_ready(body):
+                return current
+            time.sleep(max(interval, 0.1))
+        if last_body:
+            status = self._status_from_body(last_body, fallback=current.status)
+            return self._session_from_body(current, last_body, status=CallStatus.timed_out if not self.is_session_terminal(status) else status)
+        return current.model_copy(update={"status": CallStatus.timed_out})
+
     def end_call(self, session: CallSession) -> CallSession:
         return session.model_copy(update={"status": CallStatus.completed})
 
@@ -233,13 +306,19 @@ class VapiProvider(CallProviderAdapter):
             return os.getenv(env_name)
         return value
 
-    def _fetch_call(self, session: CallSession, *, allow_initial: bool = False) -> dict[str, Any]:
+    def _fetch_call(
+        self,
+        session: CallSession,
+        *,
+        allow_initial: bool = False,
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
         logger.info("Vapi _fetch_call start call_id=%s allow_initial=%s", session.provider_call_id, allow_initial)
         cached = session.provider_metadata.get("vapi_response")
-        if isinstance(cached, dict) and _has_vapi_evidence(cached):
+        if use_cache and isinstance(cached, dict) and _has_vapi_evidence(cached):
             logger.info("Using cached Vapi call response with evidence")
             return cached
-        if allow_initial and isinstance(cached, dict) and cached.get("id") and (
+        if use_cache and allow_initial and isinstance(cached, dict) and cached.get("id") and (
             cached.get("status") or cached.get("endedReason")
         ):
             logger.info("Using cached Vapi call response with status")
@@ -267,6 +346,43 @@ class VapiProvider(CallProviderAdapter):
         logger.info("Vapi _fetch_call success keys=%s", list(body.keys()))
         return body
 
+    def _status_from_body(self, body: dict[str, Any], *, fallback: CallStatus) -> CallStatus:
+        status = str(body.get("status") or body.get("endedReason") or "").strip().lower()
+        if status in {"ended", "completed", "finished"}:
+            return CallStatus.completed
+        if status in {"failed", "error"}:
+            return CallStatus.failed
+        if status in {"queued", "scheduled"}:
+            return CallStatus.created
+        if status in {"ringing"}:
+            return CallStatus.ringing
+        if status in {"in-progress", "in_progress", "active", "started"}:
+            return CallStatus.in_progress
+        return fallback if fallback != CallStatus.created else CallStatus.in_progress
+
+    def _session_from_body(
+        self,
+        session: CallSession,
+        body: dict[str, Any],
+        *,
+        status: CallStatus,
+    ) -> CallSession:
+        metadata = {
+            **(session.provider_metadata or {}),
+            "vapi_response": body,
+        }
+        return session.model_copy(
+            update={
+                "status": status,
+                "started_at": body.get("startedAt") or session.started_at,
+                "ended_at": body.get("endedAt") or session.ended_at,
+                "provider_metadata": metadata,
+            }
+        )
+
+    def _artifacts_ready(self, body: dict[str, Any]) -> bool:
+        return bool(_transcript_turns_from_vapi_call(body)) and _has_vapi_recording(body)
+
 
 def _has_vapi_evidence(data: dict[str, Any]) -> bool:
     return any(
@@ -280,6 +396,16 @@ def _has_vapi_evidence(data: dict[str, Any]) -> bool:
             "artifact",
             "status",
         )
+    )
+
+
+def _has_vapi_recording(data: dict[str, Any]) -> bool:
+    artifact = data.get("artifact")
+    return bool(
+        data.get("recordingUrl")
+        or data.get("recording_url")
+        or data.get("stereoRecordingUrl")
+        or (artifact.get("recordingUrl") if isinstance(artifact, dict) else None)
     )
 
 

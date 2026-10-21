@@ -25,6 +25,7 @@ from app.connections.api import router as connections_router
 from app.connections.browser_auth import browser_auth_manager
 from app.calling.ui_api import router as calling_router
 from app.evaluations_api import router as evaluations_router
+from app.management.api import router as management_router
 
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ app = FastAPI(
 app.include_router(connections_router)
 app.include_router(calling_router)
 app.include_router(evaluations_router)
+app.include_router(management_router)
 
 # ---------------------------------------------------------------------------
 # CORS — allow browser requests from any origin (dev/local setup)

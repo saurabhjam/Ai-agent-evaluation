@@ -211,11 +211,23 @@ def _metric_failure(
 ) -> FailureAnalysis:
     message_id = _metric_message_id(metric)
     turn = _turn_index(metric)
-    if turn is None and message_id:
-        turn = _turn_index_for_message(context.get("conversation") or [], message_id)
-    if turn is None and context.get("conversation"):
-        turn = len(context.get("conversation") or []) - 1
-    snippet = _conversation_snippet(context.get("conversation") or [], turn)
+    conversation = context.get("conversation") or []
+    resolved_message_id = None
+    if message_id:
+        matched = next(((index, item) for index, item in enumerate(conversation) if _message_id(item) == message_id), None)
+        if matched:
+            turn, matched_message = matched
+            resolved_message_id = _message_id(matched_message)
+        else:
+            turn = None
+    elif turn is not None:
+        turn = next(
+            (index for index, item in enumerate(conversation) if _message_value(item, "turn_index") == turn),
+            turn if 0 <= turn < len(conversation) else None,
+        )
+        if turn is not None:
+            resolved_message_id = _message_id(conversation[turn])
+    snippet = _conversation_snippet(conversation, turn)
     failed_turn = _failed_turn(snippet)
     copy = _failure_copy(metric, failed_turn)
     business_evidence = _business_evidence(metric, snippet, copy["conversation_card"])
@@ -230,11 +242,11 @@ def _metric_failure(
         failure_summary=copy["summary"],
         expected=expected if expected is not None else _expected_from_metric(metric),
         actual=_actual_from_metric(metric, failed_turn),
-        root_cause=copy["root_cause"] or root_cause,
+        root_cause=f"Possible cause (not confirmed): {copy['root_cause'] or root_cause}",
         business_impact=copy["business_impact"],
         recommendation=copy["recommendation"] or recommendation,
         conversation_turn=turn,
-        conversation_message_id=message_id or _message_id_from_snippet(snippet, turn),
+        conversation_message_id=resolved_message_id or _message_id_from_snippet(snippet, turn),
         conversation_snippet=snippet or None,
         evidence=business_evidence,
         technical_details={
@@ -251,6 +263,8 @@ def _metric_failure(
 
 
 def _metric_passed(metric: Any) -> bool:
+    if getattr(metric, "evaluation_status", None) in {"not_evaluated", "error"}:
+        return True
     return bool(getattr(metric, "passed", False))
 
 

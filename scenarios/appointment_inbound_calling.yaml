@@ -6,15 +6,27 @@ agent:
 
 persona:
   name: Rahul Sharma
+  phone_number: "9876543210"
+  appointment_reason: Routine dental checkup
+  preferred_date: "October 20, 2026"
+  preferred_time: "4:00 PM"
+
   goal: >
-    Call a dental clinic to book a routine dental appointment. Start by asking
-    to book an appointment. Provide your name, phone number, preferred date
-    (October 8, 2026), preferred time (4:00 PM), and reason only when the
-    agent asks. End after the agent confirms or cannot proceed.
+    Call a dental clinic to request a routine dental appointment.
+    Start by asking to book an appointment.
+    Provide your name, phone number, appointment reason,
+    preferred date, and preferred time only when asked.
+    Confirm correct details and end after the agent completes
+    the request or explains why it cannot proceed.
+
   tone: Natural and polite
+
   edge_case: >
-    Give only the information requested. Do not volunteer all details or
-    repeat information unless the agent asks again.
+    Answer only the agent's latest question. Do not volunteer
+    unrelated details. Remember previously shared information.
+    Answer clarification questions accurately. If the agent
+    summarizes the details correctly, confirm briefly.
+    Do not repeat information unnecessarily.
 
 max_turns: 12
 pass_threshold: 0.70

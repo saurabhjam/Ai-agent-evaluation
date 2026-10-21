@@ -165,6 +165,9 @@ class SpeechToTextProvider(ABC):
 # Concrete STT: FasterWhisperSTT
 # ===========================================================================
 
+_WHISPER_MODEL_CACHE: dict[tuple[Any, ...], Any] = {}
+
+
 class FasterWhisperSTT(SpeechToTextProvider):
     """
     STT provider backed by the faster-whisper library (local, free, CPU/GPU).
@@ -181,21 +184,33 @@ class FasterWhisperSTT(SpeechToTextProvider):
 
     def __init__(self, model_size: str = "small", device: str = "cpu",
                  compute_type: str = "int8", language: Optional[str] = None,
-                 max_audio_duration_seconds: float = _DEFAULT_MAX_STT_AUDIO_SECONDS):
+                 max_audio_duration_seconds: float = _DEFAULT_MAX_STT_AUDIO_SECONDS,
+                 cpu_threads: Optional[int] = None,
+                 beam_size: int = 1):
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
         self.language = language
         self.max_audio_duration_seconds = max_audio_duration_seconds
+        # Cap CPU threads to 4 by default to prevent Intel MKL memory pool exhaustion
+        self.cpu_threads = cpu_threads if cpu_threads is not None else min(4, os.cpu_count() or 1)
+        self.beam_size = beam_size
         self._model = None  # lazy-loaded on first use
 
     def _get_model(self):
+        cache_key = (self.model_size, self.device, self.compute_type, self.cpu_threads)
+        if cache_key in _WHISPER_MODEL_CACHE:
+            logger.info("FasterWhisperSTT reusing cached Whisper model key=%s", cache_key)
+            self._model = _WHISPER_MODEL_CACHE[cache_key]
+            return self._model
+
         if self._model is None:
             logger.info(
-                "FasterWhisperSTT creating Whisper model name=%s device=%s compute_type=%s",
+                "FasterWhisperSTT creating Whisper model name=%s device=%s compute_type=%s cpu_threads=%s",
                 self.model_size,
                 self.device,
                 self.compute_type,
+                self.cpu_threads,
             )
             try:
                 from faster_whisper import WhisperModel
@@ -208,7 +223,9 @@ class FasterWhisperSTT(SpeechToTextProvider):
                 self.model_size,
                 device=self.device,
                 compute_type=self.compute_type,
+                cpu_threads=self.cpu_threads,
             )
+            _WHISPER_MODEL_CACHE[cache_key] = self._model
         else:
             logger.info("FasterWhisperSTT reusing Whisper model name=%s", self.model_size)
         return self._model
@@ -238,7 +255,7 @@ class FasterWhisperSTT(SpeechToTextProvider):
         segments, _ = model.transcribe(
             audio_file,
             language=self.language,
-            beam_size=5,
+            beam_size=self.beam_size,
         )
         return " ".join(seg.text.strip() for seg in segments).strip()
 

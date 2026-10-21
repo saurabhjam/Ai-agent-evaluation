@@ -94,6 +94,10 @@ class MetricResult(BaseModel):
     evidence_source: Optional[str] = None
     turn_index: Optional[int] = None
     conversation_message_id: Optional[str] = None
+    evaluation_status: Optional[str] = None
+    evidence_status: Optional[str] = None
+    evidence: Optional[list[dict[str, Any]]] = None
+    diagnostics: Optional[dict[str, Any]] = None
 
 
 class RAGEvaluationSummary(BaseModel):

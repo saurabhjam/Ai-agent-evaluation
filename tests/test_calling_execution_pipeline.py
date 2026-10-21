@@ -14,7 +14,7 @@ from app.calling.models import (
     RawCallTranscript,
     TranscriptSpeaker,
 )
-from app.calling.provider_adapter import ProviderCapabilities
+from app.calling.provider_adapter import CallProviderAdapter, ProviderCapabilities
 from app.calling.provider_resolver import ProviderResolver
 from app.calling.provider_registry import ProviderRegistry
 from app.calling.providers.mock import MockCallProvider
@@ -109,6 +109,83 @@ def test_calling_execution_pipeline_inbound_success():
     assert result.status == CallingExecutionStatus.completed
     assert result.call_session.direction == CallDirection.inbound
     assert result.normalized_conversation.metadata["direction"] == "inbound"
+
+
+class LifecycleProvider(CallProviderAdapter):
+    wait_calls = 0
+
+    def __init__(self, config):
+        self.config = config
+
+    def get_capabilities(self):
+        return ProviderCapabilities(
+            supports_outbound_sessions=True,
+            supports_provider_transcript=True,
+            preferred_transcript_source="provider",
+        )
+
+    def start_outbound_call(self, *, to, from_=None, metadata=None):
+        return CallSession(
+            direction=CallDirection.outbound,
+            provider=CallProvider.custom,
+            provider_name="lifecycle",
+            provider_call_id="call-lifecycle",
+            status=CallStatus.in_progress,
+        )
+
+    def prepare_inbound_call(self, *, expected_from=None, metadata=None):
+        raise NotImplementedError
+
+    def get_call_status(self, session):
+        return session.status
+
+    def wait_for_completion(self, session, **kwargs):
+        type(self).wait_calls += 1
+        return session.model_copy(update={"status": CallStatus.completed})
+
+    def end_call(self, session):
+        return session
+
+    def fetch_recording(self, session):
+        return None
+
+    def fetch_events(self, session):
+        return []
+
+    def fetch_transcript(self, session):
+        return RawCallTranscript(
+            session_id=session.session_id,
+            run_id=session.run_id,
+            source="provider",
+            turns=[
+                CallTranscriptTurn(
+                    speaker=TranscriptSpeaker.agent,
+                    text="Hello",
+                    turn_index=0,
+                )
+            ],
+        )
+
+    def download_recording(self, recording, destination_dir):
+        return recording
+
+
+def test_calling_execution_pipeline_uses_provider_completion_contract():
+    registry = ProviderRegistry()
+    registry.register("lifecycle", LifecycleProvider)
+    context = CallingExecutionContext(
+        scenario=_scenario(),
+        provider_config=CallingProviderConfig(provider_name="lifecycle"),
+    )
+    LifecycleProvider.wait_calls = 0
+
+    result = CallingExecutionPipeline(
+        provider_resolver=ProviderResolver(registry=registry)
+    ).execute(context)
+
+    assert result.status == CallingExecutionStatus.completed
+    assert result.call_session.status == CallStatus.completed
+    assert LifecycleProvider.wait_calls == 1
 
 
 class TranscriptProvider:

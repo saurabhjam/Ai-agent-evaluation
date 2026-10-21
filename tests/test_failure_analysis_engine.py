@@ -157,15 +157,15 @@ def test_passed_metrics_do_not_generate_failure_analysis():
     assert engine.generate(metrics=[metric]) == []
 
 
-def test_missing_metric_reference_uses_deterministic_conversation_fallback():
+def test_missing_metric_reference_does_not_fabricate_conversation_evidence():
     engine = FailureAnalysisEngine()
     metric = MetricResult(name="Goal Completion", score=0.2, passed=False, reason="Bad")
 
     result = engine.generate(metrics=[metric], conversation=_conversation())
 
-    assert result[0].conversation_turn == 2
-    assert result[0].conversation_message_id == "msg_2"
-    assert result[0].conversation_snippet
+    assert result[0].conversation_turn is None
+    assert result[0].conversation_message_id is None
+    assert result[0].conversation_snippet is None
 
 
 def test_missing_evidence_is_allowed():
@@ -426,5 +426,7 @@ def test_evaluation_service_populates_failure_analysis_without_changing_score(mo
     assert result.failure_analysis[0].metric_name == "Goal Completion"
     assert result.conversation[0].conversation_message_id == "ef-message-0"
     assert result.conversation[0].turn_index == 0
-    assert result.failure_analysis[0].conversation_message_id == "ef-message-0"
-    assert result.failure_analysis[0].conversation_turn == 0
+    # The evaluator did not identify a failing message, so failure analysis must
+    # not attribute the failure to an arbitrary transcript item.
+    assert result.failure_analysis[0].conversation_message_id is None
+    assert result.failure_analysis[0].conversation_turn is None

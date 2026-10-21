@@ -1,6 +1,7 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, SecretStr
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -17,6 +18,9 @@ class Settings(BaseSettings):
     # Simulated user model (Groq)
     groq_api_key: str = ""
     groq_model: str = "llama-3.1-8b-instant"
+    calling_diagnostics_enabled: bool = False
+    calling_diagnostics_encrypted_text: bool = False
+    calling_diagnostics_encryption_key: SecretStr = SecretStr("")
 
     # Simulated user model
     ollama_base_url: str = "http://localhost:11434"
@@ -33,6 +37,7 @@ class Settings(BaseSettings):
 
     # Storage
     db_path: str = "./eval_results.db"
+    management_baseline_at: datetime = datetime(2026, 10, 21, 11, 0, 22, tzinfo=timezone.utc)
 
     # Backend validation limits — enforced in schemas.py
     max_turns_per_run: int = 12

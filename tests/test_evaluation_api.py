@@ -11,7 +11,8 @@ from app.evaluation_service import EvaluationResult, ConversationTurn
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
-def clear_repository():
+def clear_repository(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.connections.storage.settings.db_path", str(tmp_path / "evaluation_api.db"))
     repository.clear()
     yield
 

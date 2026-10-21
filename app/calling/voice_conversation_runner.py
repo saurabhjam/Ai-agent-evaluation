@@ -15,7 +15,8 @@ from app.calling.models import (
 )
 from app.calling.voice_transport import VoiceTransport, VoiceTransportSession
 from app.schemas import Persona
-from app.simulator import generate_next_user_turn
+from app.calling.simulator import generate_next_user_turn
+from app.calling import diagnostics
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class VoiceConversationRunner:
     tts_provider: Optional[Any] = None
     stt_provider: Optional[Any] = None
 
+    @diagnostics.traced_conversation
     def run(
         self,
         *,
@@ -53,7 +55,10 @@ class VoiceConversationRunner:
         transport.connect(session)
         try:
             for turn_index in range(self.max_turns):
-                agent_text = self._receive_agent_text(transport)
+                diagnostics.begin_turn(turn_index)
+                with diagnostics.stage("agent.receive", "calling_runner"):
+                    agent_text = self._receive_agent_text(transport)
+                diagnostics.emit("agent.simulator_input", "runner_agent_text", {"text": agent_text})
                 if agent_text:
                     turns.append(
                         CallTranscriptTurn(
@@ -63,11 +68,13 @@ class VoiceConversationRunner:
                         )
                     )
 
-                user_turn = self.simulator(persona, turns)
+                with diagnostics.stage("simulator", "calling_runner"):
+                    user_turn = self.simulator(persona, turns)
                 user_text = (user_turn.get("message") or "").strip()
                 if not user_text or "[END_CONVERSATION]" in user_text:
                     break
 
+                diagnostics.customer_text(user_text)
                 self._send_user_text(transport, user_text, turn_index=turn_index)
                 turns.append(
                     CallTranscriptTurn(
@@ -92,6 +99,7 @@ class VoiceConversationRunner:
 
     def _send_user_text(self, transport: VoiceTransport, text: str, *, turn_index: int) -> None:
         if hasattr(transport, "send_text"):
+            diagnostics.emit("transport.text_input", "transport_send_text", {"text": text})
             transport.send_text(text, turn_index=turn_index)
             return
         if not self.tts_provider or not hasattr(transport, "send_audio"):
@@ -99,14 +107,22 @@ class VoiceConversationRunner:
                 f"{transport.__class__.__name__} cannot send evaluator speech; "
                 "provide send_text() or send_audio() with a TTS provider."
             )
-        transport.send_audio(self.tts_provider.synthesize(text), turn_index=turn_index)
+        with diagnostics.stage("tts", "tts_input", {"text": text}):
+            audio = self.tts_provider.synthesize(text)
+        with diagnostics.stage("customer.send", "transport_send_audio"):
+            transport.send_audio(audio, turn_index=turn_index)
 
     def _receive_agent_text(self, transport: VoiceTransport) -> str:
         if hasattr(transport, "receive_text"):
             return str(transport.receive_text(timeout_seconds=self.receive_timeout_seconds) or "").strip()
         if not hasattr(transport, "receive_audio"):
             return ""
-        audio = transport.receive_audio(timeout_seconds=self.receive_timeout_seconds)
+        control_snapshot = diagnostics.control_snapshot(transport)
+        with diagnostics.stage("audio.receive", "transport_receive_audio"):
+            try:
+                audio = transport.receive_audio(timeout_seconds=self.receive_timeout_seconds)
+            finally:
+                diagnostics.observe_controls(control_snapshot)
         info = _audio_info(audio)
         logger.info(
             "receive_agent_text audio bytes=%d wav_duration_seconds=%s sample_rate=%s channels=%s bits_per_sample=%s",
@@ -120,8 +136,11 @@ class VoiceConversationRunner:
             raise RuntimeError(
                 f"{transport.__class__.__name__} returned audio but no STT provider is configured."
             )
-        transcript = self.stt_provider.transcribe(audio)
-        return str(getattr(transcript, "text", transcript) or "").strip()
+        with diagnostics.stage("stt", "local_stt"):
+            transcript = self.stt_provider.transcribe(audio)
+        text = str(getattr(transcript, "text", transcript) or "")
+        diagnostics.emit("stt.result", "local_stt", {"text": text})
+        return text.strip()
 
 
 def _audio_info(audio_bytes: bytes) -> dict[str, Any]:

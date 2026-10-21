@@ -16,6 +16,7 @@ from app.backend_validation import BackendValidationEngine, BackendValidationSum
 from app.failure_analysis import FailureAnalysisEngine, failure_analysis_engine
 from app.models.conversation import RAGEvidence
 from app.models.failure_analysis import FailureAnalysis
+from app.evaluation_evidence import TechnicalErrorEvidence, classify_technical_errors
 
 class ConversationTurn(BaseModel):
     turn_index: int = 0
@@ -62,6 +63,7 @@ class EvaluationResult(BaseModel):
     rag_evaluation: Optional[RAGEvaluationSummary] = None
     backend_validation: Optional[BackendValidationSummary] = None
     failure_analysis: Optional[list[FailureAnalysis]] = None
+    technical_errors: Optional[list[TechnicalErrorEvidence]] = None
     error: Optional[str] = None
     created_at: str
 
@@ -82,6 +84,7 @@ class EvaluationService:
         created_at = datetime.now(timezone.utc).isoformat()
         
         if not execution_result.success:
+            technical_errors = classify_technical_errors(execution_error=execution_result.error)
             return EvaluationResult(
                 success=False,
                 agent_id=execution_result.connection_id,
@@ -90,6 +93,7 @@ class EvaluationService:
                 scenario_id=scenario.scenario_id,
                 session_id=execution_result.session_id,
                 error=f"Cannot evaluate: execution failed. Reason: {execution_result.error}",
+                technical_errors=technical_errors or None,
                 created_at=created_at,
             )
 
@@ -110,6 +114,7 @@ class EvaluationService:
             
             rag_evidence_by_turn = _rag_evidence_by_turn(transcript)
             rag_evaluation = _resolve_rag_status(rag_evidence_by_turn, scenario.rag_context)
+            technical_errors = classify_technical_errors(transcript=transcript)
 
             # 1. Base Evaluation (DeepEval metrics)
             metrics = evaluate_transcript(
@@ -117,6 +122,7 @@ class EvaluationService:
                 transcript=transcript,
                 rag_context=None if rag_evidence_by_turn else scenario.rag_context,
                 rag_evidence_by_turn=rag_evidence_by_turn or None,
+                expected_agent_persona=_expected_agent_persona(scenario),
             )
             
             # Extract conversation for report/UI rendering. Keep the existing
@@ -202,6 +208,7 @@ class EvaluationService:
                 rag_evaluation=rag_evaluation,
                 backend_validation=backend_validation,
                 failure_analysis=failure_analysis or None,
+                technical_errors=technical_errors or None,
                 created_at=created_at,
             )
 
@@ -217,6 +224,17 @@ class EvaluationService:
                 error=f"Evaluation failed: {e}",
                 created_at=created_at,
             )
+
+
+def _expected_agent_persona(scenario: TestScenario) -> Any:
+    config = getattr(getattr(scenario, "agent", None), "config", None)
+    if not isinstance(config, dict):
+        return None
+    for key in ("expected_agent_persona", "agent_persona", "expected_agent_behavior"):
+        if config.get(key) not in (None, "", {}, []):
+            return config[key]
+    expected_tone = config.get("expected_agent_tone")
+    return {"tone": expected_tone} if expected_tone else None
 
 
 def _message_value(message: Any, key: str) -> Any:
@@ -390,6 +408,7 @@ def _base_metrics(metrics: list[MetricResult]) -> list[MetricResult]:
 
 
 def _metric_average(metrics: list[MetricResult]) -> Optional[float]:
+    metrics = [metric for metric in metrics if metric.evaluation_status not in {"not_evaluated", "error"}]
     if not metrics:
         return None
     return round(sum(metric.score for metric in metrics) / len(metrics), 3)

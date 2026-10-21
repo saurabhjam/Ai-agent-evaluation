@@ -317,5 +317,21 @@ async def stream_evaluation_interactions(websocket: WebSocket, evaluation_id: st
 @router.get("/{evaluation_id}/logs/download")
 def download_evaluation_logs(evaluation_id: str):
     logs = log_manager.get_logs(evaluation_id)
+    if not logs:
+        try:
+            report = get_evaluation_report(evaluation_id)
+        except Exception:
+            # Preserve the existing download path if the optional lookup fails.
+            report = None
+        if report and report.get("agent_type") == "calling":
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "No calling diagnostic trace is available in this backend process. "
+                    "Capture may have been disabled, or in-memory logs may have been lost "
+                    "after a backend restart. Enable CALLING_DIAGNOSTICS_ENABLED before "
+                    "a new evaluation and download its logs before restarting."
+                ),
+            )
     content = "\n".join([f"[{l['timestamp']}] {l['level']} - {l['message']}" for l in logs])
     return PlainTextResponse(content)

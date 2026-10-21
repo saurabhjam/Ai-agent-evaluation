@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import fnmatch
 import logging
 import threading
@@ -36,6 +37,7 @@ class BrowserSession:
     context: Any = field(default=None, init=False)
     page: Any = field(default=None, init=False)
     launch_count: int = field(default=0, init=False)
+    _auth_stage: str = field(default="not started", init=False)
 
     def start(self) -> None:
         self.browser_auth_manager.run_coroutine_sync(self._async_start())
@@ -103,16 +105,19 @@ class BrowserSession:
             if self.playwright is None:
                 from playwright.async_api import async_playwright
 
+                self._auth_stage = "starting Playwright"
                 logger.info("[INSTRUMENT] before await async_playwright().start() | thread: %s | loop: %s", tid, loop_id)
                 self.playwright = await async_playwright().start()
                 logger.info("[INSTRUMENT] after await async_playwright().start() | thread: %s | loop: %s", tid, loop_id)
 
+            self._auth_stage = "launching Chromium"
             logger.info("[INSTRUMENT] before await chromium.launch() | thread: %s | loop: %s", tid, loop_id)
             self.browser = await self.playwright.chromium.launch(headless=True)
             logger.info("[INSTRUMENT] after await chromium.launch() | thread: %s | loop: %s", tid, loop_id)
 
             self.launch_count += 1
 
+            self._auth_stage = "creating browser context from saved state"
             logger.info("[INSTRUMENT] before await _new_context_with_extended_storage() | thread: %s | loop: %s", tid, loop_id)
             self.context = await _new_context_with_extended_storage(
                 self.browser,
@@ -121,6 +126,7 @@ class BrowserSession:
             )
             logger.info("[INSTRUMENT] after await _new_context_with_extended_storage() | thread: %s | loop: %s", tid, loop_id)
 
+            self._auth_stage = "creating browser page"
             logger.info("[INSTRUMENT] before await context.new_page() | thread: %s | loop: %s", tid, loop_id)
             self.page = await self.context.new_page()
             logger.info("[INSTRUMENT] after await context.new_page() | thread: %s | loop: %s", tid, loop_id)
@@ -178,6 +184,12 @@ class BrowserSession:
                     strategy=strategy,
                 )
             )
+        except FutureTimeoutError as exc:
+            logger.error("Browser token retrieval timed out during %s", self._auth_stage)
+            raise TimeoutError(
+                f"Browser token retrieval timed out during {self._auth_stage}; "
+                "check the saved browser session and Sophia page availability."
+            ) from exc
         finally:
             logger.info(
                 "[INSTRUMENT] EXIT BrowserSession.get_token | thread: %s | loop: %s | elapsed: %.3fs",
@@ -227,6 +239,7 @@ class BrowserSession:
 
     async def _extract_token_with_script(self, *, url: str, script: str | None) -> Any:
         logger.info("[browser-session] navigating for script strategy: %s", url)
+        self._auth_stage = "navigating to authentication page"
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         except asyncio.TimeoutError:
@@ -246,6 +259,7 @@ class BrowserSession:
             logger.debug("Browser token script extraction continued before networkidle.")
 
         logger.info("[browser-session] evaluating browser token script")
+        self._auth_stage = "evaluating token extraction script"
         try:
             extracted_token = await self.page.evaluate(script)
         except Exception:
@@ -353,6 +367,7 @@ class BrowserSession:
         try:
             if intercept_pattern:
                 logger.info("[browser-session] navigating to login URL: %s", url)
+                self._auth_stage = "navigating to authentication page"
                 goto_task = asyncio.create_task(self.page.goto(url, wait_until="domcontentloaded"))
                 logger.info("[browser-session] waiting for goto and token_future (25s)")
                 done, pending = await asyncio.wait(
@@ -367,6 +382,7 @@ class BrowserSession:
                         goto_task.result()
                         if trigger_script:
                             logger.info("[browser-session] evaluating trigger_script")
+                            self._auth_stage = "evaluating authentication trigger script"
                             trig_tok = await self.page.evaluate(trigger_script)
                             if trig_tok and not token_future.done():
                                 token_future.set_result(trig_tok)
@@ -380,12 +396,14 @@ class BrowserSession:
                     extracted_token = token_future.result()
                 else:
                     logger.info("[browser-session] token_future not done, waiting 15s more")
+                    self._auth_stage = "waiting for matching Authorization request"
                     try:
                         extracted_token = await asyncio.wait_for(token_future, timeout=15.0)
                     except asyncio.TimeoutError:
                         logger.info("[browser-session] token_future wait timed out")
 
                 if not token_future.done():
+                    self._auth_stage = "checking Clerk token on authenticated page"
                     try:
                         clerk_tok = await self.page.evaluate(
                             "window.Clerk && window.Clerk.session ? window.Clerk.session.getToken() : null"
@@ -397,6 +415,7 @@ class BrowserSession:
                         logger.debug("[browser-session] post-navigation Clerk fallback: %s", exc)
 
                 if not extracted_token and not token_future.done() and script:
+                    self._auth_stage = "checking fallback token script"
                     try:
                         script_tok = await self.page.evaluate(script)
                         if script_tok:
@@ -410,8 +429,10 @@ class BrowserSession:
                     goto_task.cancel()
             elif script:
                 logger.info("[browser-session] navigating (networkidle) for script: %s", url)
+                self._auth_stage = "navigating to authentication page"
                 await self.page.goto(url, wait_until="networkidle")
                 logger.info("[browser-session] evaluating script")
+                self._auth_stage = "evaluating token extraction script"
                 extracted_token = await self.page.evaluate(script)
 
             logger.info("[browser-session] returning token (is_none=%s)", extracted_token is None)
@@ -441,20 +462,18 @@ class BrowserSession:
         self.browser_auth_manager.run_coroutine_sync(self._async_close(), timeout=30.0)
 
     async def _async_close(self) -> None:
-        if self.page is not None:
-            logger.info("[DIAGNOSTIC] BrowserSession._async_close: Before page.close()")
-            await self.page.close()
-            logger.info("[DIAGNOSTIC] BrowserSession._async_close: After page.close()")
-            self.page = None
-        if self.context is not None:
-            logger.info("[DIAGNOSTIC] BrowserSession._async_close: Before context.close()")
-            await self.context.close()
-            logger.info("[DIAGNOSTIC] BrowserSession._async_close: After context.close()")
-            self.context = None
-        if self.browser is not None:
-            logger.info("[DIAGNOSTIC] BrowserSession._async_close: Before browser.close()")
-            await self.browser.close()
-            logger.info("[DIAGNOSTIC] BrowserSession._async_close: After browser.close()")
-            self.browser = None
+        for attr in ("page", "context", "browser"):
+            obj = getattr(self, attr)
+            if obj is None:
+                continue
+            logger.info("[browser-session] closing %s", attr)
+            try:
+                await asyncio.wait_for(obj.close(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("[browser-session] %s.close() exceeded 5 seconds; continuing cleanup", attr)
+            except Exception:
+                logger.exception("[browser-session] %s.close() failed; continuing cleanup", attr)
+            finally:
+                setattr(self, attr, None)
         # Intentionally NOT stopping self.playwright here because it shuts down the
         # dispatcher thread and permanently blocks the shared Python event loop.

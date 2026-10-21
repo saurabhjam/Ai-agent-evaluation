@@ -156,3 +156,39 @@ def test_scenario_executor_creates_one_browser_session_per_evaluation(monkeypatc
     assert len(created_sessions) == 1
     assert manager.evaluation_session.browser_session is created_sessions[0]
     assert created_sessions[0].storage_state == "state.json"
+
+
+def test_scenario_executor_closes_browser_session_when_adapter_creation_fails(monkeypatch):
+    sessions = []
+
+    class BrowserSessionThatTracksClose:
+        def __init__(self, storage_state, connection_config):
+            self.closed = False
+            sessions.append(self)
+
+        def close(self):
+            self.closed = True
+
+    class FailingManager:
+        def create_adapter(self, connection, evaluation_session=None):
+            raise TimeoutError("Browser token retrieval timed out during navigation")
+
+    monkeypatch.setattr(executor_module, "BrowserSession", BrowserSessionThatTracksClose)
+    connection = AgentConnection(
+        id="executor-timeout",
+        name="Timeout REST",
+        type=AgentType.chatbot,
+        adapter="rest",
+        config={"endpoint": "https://example.test/chat"},
+    )
+    scenario = TestScenario(
+        scenario_id="executor_timeout",
+        agent=AgentConfig(channel="chatbot", adapter="rest", config={}),
+        persona=Persona(name="Ava", goal="Ask a question", tone="polite"),
+    )
+
+    result = ScenarioExecutor(FailingManager()).execute(connection, scenario)
+
+    assert result.success is False
+    assert "Browser token retrieval timed out during navigation" in result.error
+    assert len(sessions) == 1 and sessions[0].closed

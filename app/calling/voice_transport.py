@@ -16,6 +16,7 @@ import uuid
 import io
 import wave
 import logging
+import audioop
 
 from app.calling.models import CallDirection, CallProvider, CallSession, CallStatus
 
@@ -342,8 +343,18 @@ class VapiVoiceTransport(VoiceTransport):
                 _websocket_close_reason(self.websocket),
             )
             raise VoiceTransportError("Vapi websocket is already closed before sending audio.")
+        frame_size = self._frame_size_bytes()
         try:
-            self.websocket.send(outgoing, opcode=_binary_opcode())
+            for frame in _audio_frames(outgoing, frame_size):
+                if not _websocket_connected(self.websocket):
+                    logger.info(
+                        "Vapi websocket closed while streaming audio close_status_code=%s close_reason=%s",
+                        _websocket_close_status(self.websocket),
+                        _websocket_close_reason(self.websocket),
+                    )
+                    break
+                self.websocket.send(frame, opcode=_binary_opcode())
+                time.sleep(self._frame_duration_seconds())
         except Exception as exc:
             logger.exception(
                 "Vapi websocket send_audio failed close_status_code=%s close_reason=%s",
@@ -358,6 +369,16 @@ class VapiVoiceTransport(VoiceTransport):
             raise VoiceTransportError("Vapi websocket is not connected.")
         logger.info("Waiting for Vapi audio timeout_seconds=%s", timeout_seconds)
         deadline = time.monotonic() + timeout_seconds
+        audio_chunks: list[bytes] = []
+        utterance_started = False
+        utterance_completed = False
+        has_speech = False
+        consecutive_silence_seconds = 0.0
+        silence_endpoint_seconds = float(self.config.settings.get("silence_endpoint_seconds") or 1.2)
+        silence_threshold_rms = float(self.config.settings.get("silence_threshold_rms") or 60.0)
+        sample_rate = self._sample_rate()
+        bytes_per_second = sample_rate * 2  # 16-bit mono PCM
+
         while time.monotonic() < deadline:
             _set_timeout(self.websocket, max(deadline - time.monotonic(), 0.1))
             if not _websocket_connected(self.websocket):
@@ -370,9 +391,9 @@ class VapiVoiceTransport(VoiceTransport):
             try:
                 message = self.websocket.recv()
                 
-                # Log ALL incoming messages for debugging
+                # Log incoming messages for debugging
                 if isinstance(message, bytes):
-                    logger.info("Received binary message: length=%d first_32_bytes_hex=%s", len(message), message[:32].hex())
+                    logger.debug("Received binary message: length=%d first_32_bytes_hex=%s", len(message), message[:32].hex())
                 elif isinstance(message, str):
                     logger.info("Received JSON/text message: %s", message)
                 else:
@@ -389,32 +410,70 @@ class VapiVoiceTransport(VoiceTransport):
                 
             if isinstance(message, bytes):
                 self._received_audio_chunks += 1
-                incoming = self._incoming_audio(message)
-                return incoming
+                frame_rms = _frame_rms(message)
+                frame_duration = len(message) / bytes_per_second if bytes_per_second > 0 else 0.05
+                is_silence = frame_rms < silence_threshold_rms
+
+                if not is_silence or utterance_started:
+                    has_speech = True
+                    consecutive_silence_seconds = 0.0
+                    audio_chunks.append(message)
+                else:
+                    if has_speech:
+                        audio_chunks.append(message)
+                        consecutive_silence_seconds += frame_duration
+                        if utterance_completed or consecutive_silence_seconds >= silence_endpoint_seconds:
+                            logger.info(
+                                "Received complete Vapi assistant utterance via silence endpointing chunks=%d bytes=%d silence_seconds=%.2f utterance_completed=%s",
+                                len(audio_chunks),
+                                sum(len(chunk) for chunk in audio_chunks),
+                                consecutive_silence_seconds,
+                                utterance_completed,
+                            )
+                            return self._incoming_audio(b"".join(audio_chunks))
+                    else:
+                        # Bounded leading silence (max ~0.5s) to avoid buffering dead air before speech
+                        max_leading_chunks = max(int(0.5 / frame_duration), 1) if frame_duration > 0 else 10
+                        audio_chunks.append(message)
+                        if len(audio_chunks) > max_leading_chunks:
+                            audio_chunks.pop(0)
+                continue
+
             if isinstance(message, str):
-                self._record_control_message(message)
+                control_message = self._record_control_message(message)
+                if self._is_assistant_utterance_started(control_message):
+                    utterance_started = True
+                    has_speech = True
+                if self._is_assistant_utterance_completed(control_message):
+                    utterance_completed = True
+                    if audio_chunks:
+                        logger.info(
+                            "Received complete Vapi assistant utterance chunks=%d bytes=%d utterance_started=%s",
+                            len(audio_chunks),
+                            sum(len(chunk) for chunk in audio_chunks),
+                            utterance_started,
+                        )
+                        return self._incoming_audio(b"".join(audio_chunks))
+
         logger.error("Timed out waiting for Vapi websocket audio")
+        if audio_chunks and has_speech:
+            logger.warning(
+                "Timed out waiting for Vapi assistant utterance completion; returning buffered audio chunks=%d bytes=%d",
+                len(audio_chunks),
+                sum(len(chunk) for chunk in audio_chunks),
+            )
+            return self._incoming_audio(b"".join(audio_chunks))
         raise TimeoutError("Timed out waiting for Vapi websocket audio.")
 
     def hang_up(self, session: VoiceTransportSession) -> None:
         if self.websocket is None:
             logger.info("Vapi hang_up skipped: websocket already disconnected")
             return
-        try:
-            logger.info("Sending Vapi end-call control message")
-            _log_websocket_diagnostics(
-                self.websocket,
-                "before hang_up websocket.send",
-                control_messages=self.control_messages,
-            )
-            self.websocket.send(json.dumps({"type": "end-call"}))
-        except Exception:
-            logger.exception(
-                "Failed to send Vapi end-call control message close_status_code=%s close_reason=%s",
-                _websocket_close_status(self.websocket),
-                _websocket_close_reason(self.websocket),
-            )
-            raise
+        _log_websocket_diagnostics(
+            self.websocket,
+            "before hang_up websocket.close",
+            control_messages=self.control_messages,
+        )
         self.disconnect()
 
     def disconnect(self) -> None:
@@ -428,18 +487,36 @@ class VapiVoiceTransport(VoiceTransport):
         finally:
             self.websocket = None
 
-    def _record_control_message(self, message: str) -> None:
+    def _record_control_message(self, message: str) -> dict[str, Any]:
         try:
             parsed = json.loads(message)
             if isinstance(parsed, dict):
                 self.control_messages.append(parsed)
                 logger.info("Received Vapi JSON control frame: %s", parsed)
                 logger.info("Stored Vapi control message type=%s", parsed.get("type"))
-                return
+                return parsed
         except json.JSONDecodeError:
             pass
-        self.control_messages.append({"type": "unparsed", "message": message})
+        parsed = {"type": "unparsed", "message": message}
+        self.control_messages.append(parsed)
         logger.info("Stored unparsed Vapi control message")
+        return parsed
+
+    def _is_assistant_utterance_started(self, message: dict[str, Any]) -> bool:
+        return (
+            message.get("type") == "speech-update"
+            and message.get("role") in ("assistant", "bot", None)
+            and message.get("status") == "started"
+        )
+
+    def _is_assistant_utterance_completed(self, message: dict[str, Any]) -> bool:
+        msg_type = message.get("type")
+        role = message.get("role")
+        if msg_type == "speech-update" and role in ("assistant", "bot", None) and message.get("status") == "stopped":
+            return True
+        if msg_type == "transcript" and role in ("assistant", "bot", None) and message.get("transcriptType") == "final":
+            return True
+        return False
 
     def _timeout_seconds(self) -> float:
         value = self.config.settings.get("websocket_timeout_seconds") or self.config.settings.get("timeout_seconds") or 30
@@ -447,11 +524,20 @@ class VapiVoiceTransport(VoiceTransport):
 
     def _sample_rate(self) -> int:
         audio_format = self.config.settings.get("audio_format") or {}
-        return int(audio_format.get("sampleRate") or audio_format.get("sample_rate") or 16000)
+        return int(audio_format.get("sampleRate") or audio_format.get("sample_rate") or 24000)
+
+    def _frame_duration_seconds(self) -> float:
+        value = self.config.settings.get("websocket_frame_duration_ms") or 20
+        return max(float(value), 1.0) / 1000.0
+
+    def _frame_size_bytes(self) -> int:
+        sample_rate = self._sample_rate()
+        samples_per_frame = int(sample_rate * self._frame_duration_seconds())
+        return max(samples_per_frame * 2, 2)
 
     def _outgoing_audio(self, audio_bytes: bytes) -> bytes:
         if _is_wav(audio_bytes):
-            return _wav_frames(audio_bytes)
+            return _wav_frames(audio_bytes, target_sample_rate=self._sample_rate())
         return audio_bytes
 
     def _incoming_audio(self, audio_bytes: bytes) -> bytes:
@@ -466,7 +552,6 @@ class VapiVoiceTransport(VoiceTransport):
         if _is_wav(input_bytes):
             try:
                 with wave.open(io.BytesIO(input_bytes), "rb") as wav:
-                    sample_rate = wav.getframerate()
                     channels = wav.getnchannels()
                     bits_per_sample = wav.getsampwidth() * 8
             except wave.Error:
@@ -569,13 +654,42 @@ def _websocket_close_reason(socket: Any) -> Any:
     return None
 
 
+def _frame_rms(frame: bytes) -> float:
+    if not frame:
+        return 0.0
+    if len(frame) % 2 != 0:
+        frame = frame[: len(frame) - 1]
+    if not frame:
+        return 0.0
+    try:
+        return float(audioop.rms(frame, 2))
+    except Exception:
+        return 0.0 if not any(frame) else 100.0
+
+
 def _is_wav(audio_bytes: bytes) -> bool:
     return audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:16]
 
 
-def _wav_frames(audio_bytes: bytes) -> bytes:
+def _audio_frames(audio_bytes: bytes, frame_size: int):
+    for start in range(0, len(audio_bytes), frame_size):
+        frame = audio_bytes[start : start + frame_size]
+        if frame:
+            if len(frame) < frame_size:
+                frame = frame + (b"\x00" * (frame_size - len(frame)))
+            yield frame
+
+
+def _wav_frames(audio_bytes: bytes, *, target_sample_rate: int) -> bytes:
     with wave.open(io.BytesIO(audio_bytes), "rb") as wav:
-        return wav.readframes(wav.getnframes())
+        sample_rate = wav.getframerate()
+        channels = wav.getnchannels()
+        sample_width = wav.getsampwidth()
+        frames = wav.readframes(wav.getnframes())
+    if sample_rate == target_sample_rate:
+        return frames
+    resampled, _ = audioop.ratecv(frames, sample_width, channels, sample_rate, target_sample_rate, None)
+    return resampled
 
 
 def _pcm_to_wav(audio_bytes: bytes, *, sample_rate: int) -> bytes:
