@@ -15,6 +15,10 @@ from app.management.consolidated_exporters import (
     render_consolidated_pdf,
 )
 from app.management.consolidated_models import ConsolidatedReport
+from app.management.consolidated_package import (
+    ConsolidatedPackageError,
+    build_consolidated_report_package,
+)
 from app.management.consolidated_report import ConsolidatedReportEngine
 from app.management.models import AgentDetail, PaginatedAgents, PaginatedEvaluations, ScenarioSummary
 from app.management.service import AgentNotFoundError, ManagementAggregationService
@@ -174,3 +178,27 @@ def download_consolidated_csv(
 ) -> Response:
     report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
     return Response(render_consolidated_csv(report), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=evalforge-consolidated-report.csv"})
+
+
+@router.get("/agents/{agent_key}/consolidated-report/package")
+def download_consolidated_package(
+    agent_key: str,
+    scenario_id: str | None = None,
+    status: Literal["pass", "fail", "error", "unknown"] | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
+) -> Response:
+    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    try:
+        package = build_consolidated_report_package(report)
+    except ConsolidatedPackageError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="The complete consolidated report package could not be generated.",
+        ) from exc
+    return Response(
+        package.content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{package.filename}"'},
+    )

@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from app.log_stream import log_manager
 from app.interaction_protocol import interaction_manager
 
-from app.evaluation_store import get_evaluation_report, list_evaluation_reports
+from app.evaluation_store import delete_evaluation_report, get_evaluation_report, list_evaluation_reports
 from app.report_engine import (
     build_enterprise_report,
     build_enterprise_report_docx,
@@ -40,6 +40,24 @@ def get_evaluation(evaluation_id: str) -> dict[str, Any]:
     if not report:
         raise HTTPException(status_code=404, detail="Evaluation not found")
     return report
+
+
+@router.delete("/{evaluation_id}")
+def delete_evaluation(evaluation_id: str) -> dict[str, Any]:
+    try:
+        result = delete_evaluation_report(evaluation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Evaluation could not be deleted") from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    return {
+        "evaluation_id": evaluation_id,
+        "deleted": True,
+        "artifact_cleanup": result["artifact_cleanup"],
+        "message": "Evaluation deleted successfully.",
+    }
 
 
 @router.get("/{evaluation_id}/report")

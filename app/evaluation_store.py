@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
+import shutil
 import sqlite3
 import uuid
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+_EVALUATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS evaluation_reports (
@@ -117,6 +125,72 @@ def list_evaluation_reports(connection_id: str | None = None) -> list[dict[str, 
                 "SELECT payload FROM evaluation_reports ORDER BY created_at DESC"
             ).fetchall()
     return [json.loads(row[0]) for row in rows]
+
+
+def delete_evaluation_report(evaluation_id: str) -> dict[str, Any] | None:
+    """Permanently delete one evaluation and its exclusive artifact directory.
+
+    The complete evaluation is stored in one SQLite row, so there are no child
+    records to cascade. The only filesystem ownership recognized here is the
+    exact ``artifacts/<evaluation_id>`` directory created for uploaded evidence.
+    """
+    if not _EVALUATION_ID_PATTERN.fullmatch(str(evaluation_id or "")):
+        raise ValueError("Invalid evaluation ID")
+
+    artifact_dir = _evaluation_artifact_dir(evaluation_id)
+    staged_dir: Path | None = None
+    if artifact_dir.is_dir():
+        staged_dir = artifact_dir.with_name(f".{evaluation_id}.deleting-{uuid.uuid4().hex}")
+        artifact_dir.replace(staged_dir)
+
+    try:
+        with _conn() as conn:
+            row = conn.execute(
+                "SELECT payload FROM evaluation_reports WHERE evaluation_id = ?",
+                (evaluation_id,),
+            ).fetchone()
+            if row is None:
+                if staged_dir is not None:
+                    staged_dir.replace(artifact_dir)
+                    staged_dir = None
+                return None
+            cursor = conn.execute(
+                "DELETE FROM evaluation_reports WHERE evaluation_id = ?",
+                (evaluation_id,),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Evaluation deletion did not remove exactly one record")
+            deleted = json.loads(row[0])
+    except Exception:
+        if staged_dir is not None and staged_dir.exists() and not artifact_dir.exists():
+            staged_dir.replace(artifact_dir)
+        raise
+
+    artifact_cleanup = "not_found"
+    if staged_dir is not None:
+        try:
+            shutil.rmtree(staged_dir)
+            artifact_cleanup = "deleted"
+        except OSError:
+            artifact_cleanup = "pending"
+            logger.exception(
+                "Evaluation %s was deleted but staged artifact cleanup remains pending",
+                evaluation_id,
+            )
+    return {
+        "evaluation_id": evaluation_id,
+        "deleted": True,
+        "artifact_cleanup": artifact_cleanup,
+        "report": deleted,
+    }
+
+
+def _evaluation_artifact_dir(evaluation_id: str) -> Path:
+    root = (Path(__file__).resolve().parents[1] / "artifacts").resolve()
+    candidate = (root / evaluation_id).resolve()
+    if candidate.parent != root:
+        raise ValueError("Invalid evaluation artifact path")
+    return candidate
 
 
 def _string_or_none(value: Any) -> str | None:

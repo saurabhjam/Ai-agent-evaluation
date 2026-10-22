@@ -73,3 +73,35 @@ def test_consolidated_layout_is_responsive():
         assert selector in STYLES
     assert "@media(max-width:1024px)" in STYLES
     assert "@media(max-width:768px)" in STYLES
+
+
+def test_comparability_warning_icon_has_a_bounded_report_specific_container():
+    coverage = _between("  _consolidatedCoverage", "  _consolidatedMetrics")
+    assert 'class="consolidated-warning-icon"' in coverage
+    assert ".consolidated-warning-icon svg" in STYLES
+    assert "max-height: 16px" in STYLES
+    assert "max-width: 16px" in STYLES
+
+
+def test_consolidated_report_uses_available_desktop_width_without_global_changes():
+    assert "#page-consolidated-report" in STYLES
+    assert ".consolidated-report-shell { width: 100%; max-width: 1400px" in STYLES
+    assert "#consolidated-report-content { width: 100%; min-width: 0; }" in STYLES
+
+
+def test_consolidated_tables_have_scoped_responsive_column_classes():
+    table = _between("  _consolidatedTable", "  /* ══════════════════════════════════════════════════════════\n     CONNECTIONS PAGE")
+    assert "consolidated-table-wrapper" in table
+    assert "columnClass(headers[index])" in table
+    assert ".consolidated-table-wrapper { max-width: 100%; overflow-x: auto; }" in STYLES
+    assert ".consolidated-column-evaluation-id" in STYLES
+    assert ".consolidated-column-timestamp" in STYLES
+
+
+def test_executive_summary_prioritizes_score_and_period_without_changing_fields():
+    executive = _between("  _consolidatedExecutive", "  _consolidatedCoverage")
+    assert "consolidated-executive-grid" in executive
+    assert '"Mean Selected Run Score"' in executive
+    assert '"Selected Evaluation Period",periodText,"period"' in executive
+    assert ".consolidated-executive-grid .consolidated-stat.primary" in STYLES
+    assert ".consolidated-executive-grid .consolidated-stat.period" in STYLES

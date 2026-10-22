@@ -60,6 +60,7 @@ const API = {
   testCallingConnection:   (id)     => API.post("/calling/connections/" + id + "/test"),
   runCallingEvaluation:    (id, d)  => API.post("/calling/connections/" + id + "/run", d),
   listEvaluations:         ()       => API.get("/evaluations"),
+  deleteEvaluation:        (id)     => API.delete("/evaluations/" + encodeURIComponent(id)),
   listManagementAgents:    (params) => {
     var query = new URLSearchParams();
     Object.keys(params || {}).forEach(function(key) {
@@ -117,6 +118,8 @@ const State = {
   interactionStreamEvalId: null,
   interactionQueue: [],
   pendingInteraction: null,
+  pendingEvaluationDelete: null,
+  evaluationDeleteRunning: false,
   cameraStream: null,
   cameraRetakes: 0,
   evaluationRunning: false,
@@ -702,17 +705,29 @@ var App = window.App = {
     } else {
       var rows = items.map(function(item) {
         var technical = item.status === "error" ? '<span class="badge badge-warning">ERROR</span>' : '<span class="badge badge-gray">—</span>';
+        var score = String(item.status || "").toLowerCase() === "error"
+          ? "N/A"
+          : (item.overall_score === null || item.overall_score === undefined ? "—" : fmtScore(item.overall_score));
         var reportButton = item.evaluation_id && item.report_url
           ? '<button class="btn btn-ghost btn-sm management-view-report" data-evaluation-id="' + escAttr(item.evaluation_id) + '">' + Icon.eye + ' View Report</button>'
           : '<button class="btn btn-ghost btn-sm" disabled>Unavailable</button>';
+        var deleteButton = item.evaluation_id
+          ? '<button class="btn btn-danger btn-sm management-delete-evaluation" data-evaluation-id="' + escAttr(item.evaluation_id) + '">' + Icon.trash + ' Delete</button>'
+          : '<button class="btn btn-danger btn-sm" disabled>Delete</button>';
         return '<tr><td class="td-primary">' + escHtml(item.scenario_id || "Unknown") + '</td><td><span class="management-evaluation-id">' + escHtml(item.evaluation_id || "—") + '</span></td>' +
           '<td>' + escHtml(item.created_at ? fmtDate(item.created_at) : "—") + '</td><td>' + escHtml(provider) + '</td>' +
-          '<td class="management-score">' + escHtml(item.overall_score === null || item.overall_score === undefined ? "—" : fmtScore(item.overall_score)) + '</td>' +
-          '<td>' + App._managementOutcomeBadge(item.status) + '</td><td>' + technical + '</td><td>' + reportButton + '</td></tr>';
+          '<td class="management-score">' + escHtml(score) + '</td>' +
+          '<td>' + App._managementOutcomeBadge(item.status) + '</td><td>' + technical + '</td><td><div class="management-row-actions">' + reportButton + deleteButton + '</div></td></tr>';
       }).join("");
-      content.innerHTML = '<table class="management-history-table"><thead><tr><th>Scenario</th><th>Evaluation ID</th><th>Date / Time</th><th>Provider</th><th>Score</th><th>Outcome</th><th>Technical Status</th><th>Report</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      content.innerHTML = '<table class="management-history-table"><thead><tr><th>Scenario</th><th>Evaluation ID</th><th>Date / Time</th><th>Provider</th><th>Score</th><th>Outcome</th><th>Technical Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table>';
       document.querySelectorAll(".management-view-report").forEach(function(button) {
         button.addEventListener("click", function() { App.openManagementEvaluationReport(button.dataset.evaluationId); });
+      });
+      document.querySelectorAll(".management-delete-evaluation").forEach(function(button) {
+        button.addEventListener("click", function() {
+          var evaluation = items.find(function(item) { return item.evaluation_id === button.dataset.evaluationId; });
+          App.openDeleteEvaluationModal(evaluation);
+        });
       });
     }
     App._renderManagementPagination(result);
@@ -724,6 +739,48 @@ var App = window.App = {
     if (status === "fail") return '<span class="badge badge-fail">' + Icon.x + ' FAIL</span>';
     if (status === "error") return '<span class="badge badge-warning">' + Icon.alert + ' ERROR</span>';
     return '<span class="badge badge-gray">UNKNOWN</span>';
+  },
+
+  openDeleteEvaluationModal(evaluation) {
+    if (!evaluation || !evaluation.evaluation_id || State.evaluationDeleteRunning) return;
+    State.pendingEvaluationDelete = evaluation;
+    document.getElementById("delete-evaluation-scenario").textContent = evaluation.scenario_id || "N/A";
+    document.getElementById("delete-evaluation-id").textContent = evaluation.evaluation_id;
+    document.getElementById("delete-evaluation-date").textContent = evaluation.created_at ? fmtDate(evaluation.created_at) : "N/A";
+    document.getElementById("delete-evaluation-outcome").textContent = String(evaluation.status || "unknown").toUpperCase();
+    setAlert("modal-delete-evaluation-alert", "");
+    App.openModal("modal-delete-evaluation");
+  },
+
+  closeDeleteEvaluationModal() {
+    if (State.evaluationDeleteRunning) return;
+    State.pendingEvaluationDelete = null;
+    App.closeModal("modal-delete-evaluation");
+  },
+
+  async confirmDeleteEvaluation() {
+    var evaluation = State.pendingEvaluationDelete;
+    if (!evaluation || !evaluation.evaluation_id || State.evaluationDeleteRunning) return;
+    State.evaluationDeleteRunning = true;
+    var button = document.getElementById("btn-confirm-delete-evaluation");
+    button.disabled = true;
+    button.textContent = "Deleting...";
+    setAlert("modal-delete-evaluation-alert", "");
+    try {
+      await API.deleteEvaluation(evaluation.evaluation_id);
+      State.pendingEvaluationDelete = null;
+      App.closeModal("modal-delete-evaluation");
+      toast("Evaluation deleted successfully.", "success");
+      if (State.managementAgentDetail) {
+        await App.loadManagementAgentDetails(State.managementAgentDetail);
+      }
+    } catch (e) {
+      setAlert("modal-delete-evaluation-alert", "Delete failed: " + e.message, "error");
+    } finally {
+      State.evaluationDeleteRunning = false;
+      button.disabled = false;
+      button.textContent = "Delete Evaluation";
+    }
   },
 
   _renderManagementPagination(result) {
@@ -839,7 +896,7 @@ var App = window.App = {
     Object.keys(filters).forEach(function(key) { if (filters[key]) query.set(key, key.indexOf("date_") === 0 ? filters[key] + (key === "date_from" ? "T00:00:00Z" : "T23:59:59.999Z") : filters[key]); });
     var suffix = query.toString() ? "?" + query.toString() : "";
     return '<div class="consolidated-toolbar"><button class="btn btn-ghost btn-sm" onclick="App.navigate(\'agent-details\', State.managementAgentDetail)">' + Icon.back + ' Back to Agent Details</button><div class="consolidated-downloads">' +
-      App._reportDownloadLink(Config.apiBase + base + "pdf" + suffix, "Download PDF") + App._reportDownloadLink(Config.apiBase + base + "html" + suffix, "Download HTML") + App._reportDownloadLink(Config.apiBase + base + "docx" + suffix, "Download DOCX") + App._reportDownloadLink(Config.apiBase + base + "csv" + suffix, "Download CSV") + '</div></div>' +
+      App._reportDownloadLink(Config.apiBase + base + "package" + suffix, "Download Report Package") + App._reportDownloadLink(Config.apiBase + base + "pdf" + suffix, "Download PDF") + App._reportDownloadLink(Config.apiBase + base + "html" + suffix, "Download HTML") + App._reportDownloadLink(Config.apiBase + base + "docx" + suffix, "Download DOCX") + App._reportDownloadLink(Config.apiBase + base + "csv" + suffix, "Download CSV") + '</div></div>' +
       '<div class="consolidated-filters"><div><label class="form-label">Scenario</label><select class="form-input" id="consolidated-scenario"><option value="">All scenarios</option>' + scenarioOptions + '</select></div><div><label class="form-label">Outcome</label><select class="form-input" id="consolidated-status"><option value="">All outcomes</option>' + ["pass","fail","error","unknown"].map(function(value) { return '<option value="'+value+'" '+(filters.status===value?'selected':'')+'>'+value.toUpperCase()+'</option>'; }).join("") + '</select></div><div><label class="form-label">From</label><input class="form-input" id="consolidated-from" type="date" value="' + escAttr(filters.date_from || "") + '"></div><div><label class="form-label">To</label><input class="form-input" id="consolidated-to" type="date" value="' + escAttr(filters.date_to || "") + '"></div><div class="management-filter-actions"><button class="btn btn-primary btn-sm" onclick="App.applyConsolidatedFilters()">Apply</button><button class="btn btn-secondary btn-sm" onclick="App.clearConsolidatedFilters()">Clear</button></div></div>';
   },
 
@@ -852,12 +909,12 @@ var App = window.App = {
   _consolidatedCard(label, value, tone) { return '<div class="consolidated-stat ' + escAttr(tone || "") + '"><span>' + escHtml(label) + '</span><strong>' + escHtml(value === null || value === undefined ? "—" : value) + '</strong></div>'; },
   _consolidatedExecutive(x) {
     var period=x.selected_period||{}; var periodText=(period.from?fmtDate(period.from):"—")+" to "+(period.to?fmtDate(period.to):"—");
-    return '<div class="consolidated-stat-grid">' + App._consolidatedCard("Mean Selected Run Score", x.mean_selected_run_score === null || x.mean_selected_run_score === undefined ? "—" : fmtScore(x.mean_selected_run_score), "primary") + App._consolidatedCard("Total Evaluation Runs", x.total_evaluation_runs) + App._consolidatedCard("Unique Scenarios", x.unique_scenarios) + App._consolidatedCard("Passed Runs", x.passed_runs, "pass") + App._consolidatedCard("Failed Runs", x.failed_runs, "fail") + App._consolidatedCard("Technical Errors", x.technical_errors, "warning") + App._consolidatedCard("Unknown Outcomes", x.unknown_outcomes) + App._consolidatedCard("Selected Evaluation Period",periodText) + '</div><div class="consolidated-narrative"><h3>Performance Overview</h3><p>' + escHtml(x.performance_overview || "No selected evaluation data.") + '</p></div><div class="consolidated-highlight-grid">' + [["Strongest evaluated metric",x.strongest_evaluated_metric],["Weakest evaluated metric",x.weakest_evaluated_metric],["Most frequent quality issue",x.most_frequent_quality_issue],["Technical reliability",x.technical_reliability]].filter(function(i){return i[1];}).map(function(i){return '<div><span>'+escHtml(i[0])+'</span><strong>'+escHtml(i[1])+'</strong></div>';}).join("") + '</div>';
+    return '<div class="consolidated-stat-grid consolidated-executive-grid">' + App._consolidatedCard("Mean Selected Run Score", x.mean_selected_run_score === null || x.mean_selected_run_score === undefined ? "—" : fmtScore(x.mean_selected_run_score), "primary") + App._consolidatedCard("Total Evaluation Runs", x.total_evaluation_runs) + App._consolidatedCard("Unique Scenarios", x.unique_scenarios) + App._consolidatedCard("Passed Runs", x.passed_runs, "pass") + App._consolidatedCard("Failed Runs", x.failed_runs, "fail") + App._consolidatedCard("Technical Errors", x.technical_errors, "warning") + App._consolidatedCard("Unknown Outcomes", x.unknown_outcomes) + App._consolidatedCard("Selected Evaluation Period",periodText,"period") + '</div><div class="consolidated-narrative"><h3>Performance Overview</h3><p>' + escHtml(x.performance_overview || "No selected evaluation data.") + '</p></div><div class="consolidated-highlight-grid">' + [["Strongest evaluated metric",x.strongest_evaluated_metric],["Weakest evaluated metric",x.weakest_evaluated_metric],["Most frequent quality issue",x.most_frequent_quality_issue],["Technical reliability",x.technical_reliability]].filter(function(i){return i[1];}).map(function(i){return '<div><span>'+escHtml(i[0])+'</span><strong>'+escHtml(i[1])+'</strong></div>';}).join("") + '</div>';
   },
   _consolidatedCoverage(x) {
     var outcomes=x.outcome_distribution||{}; var scenarios=x.scenario_coverage||[]; var warnings=x.comparability_warnings||[];
     var metricCoverage=x.metric_coverage||[];
-    return '<div class="consolidated-stat-grid">'+App._consolidatedCard("Unique Scenarios Tested",x.unique_scenarios_tested)+App._consolidatedCard("Total Evaluation Runs",x.total_evaluation_runs)+App._consolidatedCard("Valid Scored Runs",x.valid_scored_runs)+App._consolidatedCard("Technical Error Runs",x.technical_error_runs,"warning")+App._consolidatedCard("Unknown Outcome Runs",x.unknown_outcome_runs)+'</div><h3>Outcome Distribution</h3><div class="consolidated-outcomes">'+["pass","fail","error","unknown"].map(function(k){return App._consolidatedCard(k.toUpperCase(),outcomes[k]||0,k);}).join("")+'</div><h3>Scenario Coverage</h3>'+App._consolidatedTable(["Scenario","Total Runs","Valid Runs","Technical Errors","Last Evaluated"],scenarios.map(function(i){return [i.scenario_id,i.total_runs,i.valid_runs,i.technical_errors,i.last_evaluated?fmtDate(i.last_evaluated):"—"];}))+'<h3>Metric Coverage</h3>'+App._consolidatedTable(["Metric","Evaluated","NOT EVALUATED","ERROR","Coverage"],metricCoverage.map(function(i){return [i.name,i.evaluated_count,i.not_evaluated_count,i.error_count,i.coverage];}))+'<h3>Comparability</h3>'+(warnings.length?'<div class="consolidated-warnings">'+warnings.map(function(w){return '<p>'+Icon.alert+' '+escHtml(w)+'</p>';}).join("")+'</div>':'<p class="text-muted">No comparability warning was persisted.</p>');
+    return '<div class="consolidated-stat-grid">'+App._consolidatedCard("Unique Scenarios Tested",x.unique_scenarios_tested)+App._consolidatedCard("Total Evaluation Runs",x.total_evaluation_runs)+App._consolidatedCard("Valid Scored Runs",x.valid_scored_runs)+App._consolidatedCard("Technical Error Runs",x.technical_error_runs,"warning")+App._consolidatedCard("Unknown Outcome Runs",x.unknown_outcome_runs)+'</div><h3>Outcome Distribution</h3><div class="consolidated-outcomes">'+["pass","fail","error","unknown"].map(function(k){return App._consolidatedCard(k.toUpperCase(),outcomes[k]||0,k);}).join("")+'</div><h3>Scenario Coverage</h3>'+App._consolidatedTable(["Scenario","Total Runs","Valid Runs","Technical Errors","Last Evaluated"],scenarios.map(function(i){return [i.scenario_id,i.total_runs,i.valid_runs,i.technical_errors,i.last_evaluated?fmtDate(i.last_evaluated):"—"];}))+'<h3>Metric Coverage</h3>'+App._consolidatedTable(["Metric","Evaluated","NOT EVALUATED","ERROR","Coverage"],metricCoverage.map(function(i){return [i.name,i.evaluated_count,i.not_evaluated_count,i.error_count,i.coverage];}))+'<h3>Comparability</h3>'+(warnings.length?'<div class="consolidated-warnings">'+warnings.map(function(w){return '<p><span class="consolidated-warning-icon" aria-hidden="true">'+Icon.alert+'</span><span>'+escHtml(w)+'</span></p>';}).join("")+'</div>':'<p class="text-muted">No comparability warning was persisted.</p>');
   },
   _consolidatedMetrics(items) { return App._consolidatedTable(["Metric","Average","Evaluated","Pass","Fail","NOT EVALUATED","ERROR","Coverage"],items.map(function(i){return [i.name,i.average_score===null?"—":fmtScore(i.average_score),i.evaluated_count,i.pass_count,i.fail_count,i.not_evaluated_count,i.error_count,i.coverage];})); },
   _consolidatedScenarios(items) { return items.length ? App._consolidatedTable(["Scenario","Runs","Valid","Errors","Latest Valid Evaluation","Score","Outcome","Last Evaluated","Report"],items.map(function(i){return [i.scenario_id,i.total_runs,i.valid_runs,i.technical_errors,i.latest_valid_evaluation_id||"—",i.latest_valid_score===null?"—":fmtScore(i.latest_valid_score),(i.latest_valid_outcome||"—").toUpperCase(),i.last_evaluated?fmtDate(i.last_evaluated):"—",i.latest_valid_evaluation_id?'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.latest_valid_evaluation_id)+'">'+Icon.eye+' View Report</button>':"—"];}), true) : App._emptyStateHtml(Icon.doc,"No evaluations match this selection.","Adjust the report filters."); },
@@ -865,7 +922,13 @@ var App = window.App = {
   _consolidatedRecommendations(items) { return items.length?'<div class="consolidated-recommendations">'+items.map(function(i){return '<article><span class="badge badge-'+(i.priority==="High"?'fail':'warning')+'">'+escHtml(i.priority)+'</span><h3>'+escHtml(i.trigger)+'</h3><p>'+escHtml(i.recommendation)+'</p><small>Scenarios: '+escHtml((i.affected_scenarios||[]).join(", ")||"—")+' · Evidence: '+escHtml((i.evaluation_ids||[]).join(", ")||"—")+'</small></article>';}).join("")+'</div>':'<p class="text-muted">No evidence-backed recommendations were generated.</p>'; },
   _consolidatedHistory(x) { if(x.status==="comparable")return '<div class="consolidated-stat-grid">'+App._consolidatedCard("Previous Batch",x.previous_batch)+App._consolidatedCard("Current Batch",x.current_batch)+App._consolidatedCard("Previous Mean",x.previous_mean_score===null?"—":fmtScore(x.previous_mean_score))+App._consolidatedCard("Current Mean",x.current_mean_score===null?"—":fmtScore(x.current_mean_score))+App._consolidatedCard("Mean Change",x.mean_score_change===null?"—":fmtScore(x.mean_score_change))+'</div>'+App._consolidatedTable(["Metric","Previous","Current","Change"],(x.metric_changes||[]).map(function(i){return [i.metric,fmtScore(i.previous),fmtScore(i.current),fmtScore(i.change)];})); return '<div class="consolidated-history"><h3>'+escHtml(x.message||"Insufficient comparable evaluation history")+'</h3><ul>'+(x.reasons||[]).map(function(r){return '<li>'+escHtml(r)+'</li>';}).join("")+'</ul></div>'; },
   _consolidatedReferences(items) { return items.length?App._consolidatedTable(["Scenario","Evaluation ID","Timestamp","Outcome","Score","Technical Status","Report"],items.map(function(i){return [i.scenario_id,i.evaluation_id,i.timestamp?fmtDate(i.timestamp):"—",i.outcome.toUpperCase(),i.score===null?"—":fmtScore(i.score),i.technical_status,'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.evaluation_id)+'">'+Icon.eye+' View Report</button>'];}),true):'<p class="text-muted">No included evaluation runs.</p>'; },
-  _consolidatedTable(headers, rows, trustedLast) { return '<div class="table-wrapper"><table class="consolidated-table"><thead><tr>'+headers.map(function(h){return '<th>'+escHtml(h)+'</th>';}).join("")+'</tr></thead><tbody>'+rows.map(function(row){return '<tr>'+row.map(function(value,index){return '<td>'+((trustedLast&&index===row.length-1)?value:escHtml(value===null||value===undefined?"—":value))+'</td>';}).join("")+'</tr>';}).join("")+'</tbody></table></div>'; },
+  _consolidatedTable(headers, rows, trustedLast) {
+    function columnClass(header) {
+      var key = String(header || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      return "consolidated-column-" + (key || "value");
+    }
+    return '<div class="table-wrapper consolidated-table-wrapper"><table class="consolidated-table"><thead><tr>'+headers.map(function(h){return '<th class="'+columnClass(h)+'">'+escHtml(h)+'</th>';}).join("")+'</tr></thead><tbody>'+rows.map(function(row){return '<tr>'+row.map(function(value,index){return '<td class="'+columnClass(headers[index])+'">'+((trustedLast&&index===row.length-1)?value:escHtml(value===null||value===undefined?"—":value))+'</td>';}).join("")+'</tr>';}).join("")+'</tbody></table></div>';
+  },
 
   /* ══════════════════════════════════════════════════════════
      CONNECTIONS PAGE

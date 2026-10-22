@@ -8,7 +8,7 @@ import io
 from typing import Any
 
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph
+from reportlab.platypus import Paragraph, Spacer
 
 from app.management.consolidated_models import ConsolidatedReport
 
@@ -33,20 +33,35 @@ body{{font-family:Arial,sans-serif;color:#172033;background:#f3f6fb;margin:0}}ma
 
 def render_consolidated_pdf(report: ConsolidatedReport) -> bytes:
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
-    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import CondPageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     output = io.BytesIO()
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], fontSize=25, leading=30, textColor=colors.HexColor("#173F73"), alignment=TA_CENTER, spaceAfter=14))
-    styles.add(ParagraphStyle(name="SectionTitle", parent=styles["Heading2"], fontSize=15, leading=19, textColor=colors.HexColor("#173F73"), spaceBefore=10, spaceAfter=10))
-    styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=8, leading=11))
-    doc = SimpleDocTemplate(output, pagesize=landscape(A4), leftMargin=16*mm, rightMargin=16*mm, topMargin=17*mm, bottomMargin=16*mm)
-    story: list[Any] = [Spacer(1, 18*mm), Paragraph("EvalForge", styles["Heading2"]), Paragraph("Consolidated Evaluation Report", styles["CoverTitle"]), Paragraph(_e(report.agent_name), styles["Heading1"]), Paragraph(f"{_e(report.agent_type)} · {_e(report.provider or report.adapter or 'N/A')}", styles["BodyText"]), Paragraph(f"Generated {report.generated_at}", styles["Small"]), PageBreak()]
+    styles.add(ParagraphStyle(name="Brand", parent=styles["Heading2"], fontSize=11, leading=14, textColor=colors.HexColor("#2E73C5"), spaceAfter=8))
+    styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], fontSize=27, leading=30, textColor=colors.HexColor("#173F73"), alignment=TA_LEFT, spaceAfter=8))
+    styles.add(ParagraphStyle(name="CoverMeta", parent=styles["BodyText"], fontSize=9, leading=13, textColor=colors.HexColor("#334155")))
+    styles.add(ParagraphStyle(name="SectionTitle", parent=styles["Heading2"], fontSize=15, leading=18, textColor=colors.HexColor("#173F73"), borderColor=colors.HexColor("#2E73C5"), borderWidth=0, borderPadding=(0, 0, 5, 0), spaceBefore=10, spaceAfter=9, keepWithNext=True))
+    styles.add(ParagraphStyle(name="Subheading", parent=styles["Heading3"], fontSize=10, leading=13, textColor=colors.HexColor("#334155"), spaceBefore=6, spaceAfter=4, keepWithNext=True))
+    styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=8, leading=11, textColor=colors.HexColor("#334155")))
+    styles.add(ParagraphStyle(name="Tiny", parent=styles["BodyText"], fontSize=7, leading=9, textColor=colors.HexColor("#475569")))
+    styles.add(ParagraphStyle(name="Link", parent=styles["Tiny"], textColor=colors.HexColor("#1D5FA7")))
+    doc = SimpleDocTemplate(output, pagesize=landscape(A4), leftMargin=15*mm, rightMargin=15*mm, topMargin=16*mm, bottomMargin=17*mm, title="EvalForge Consolidated Evaluation Report", author="EvalForge")
     data = report.model_dump()
+    period = data["executive_summary"].get("selected_period") or {}
+    story: list[Any] = [
+        Paragraph("EVALFORGE", styles["Brand"]),
+        Paragraph("CONSOLIDATED<br/>EVALUATION REPORT", styles["CoverTitle"]),
+        Spacer(1, 3*mm),
+        _pdf_rule(Table, TableStyle, colors),
+        Spacer(1, 4*mm),
+        Paragraph(f"<b>Agent:</b> {_e(report.agent_name)} &nbsp;&nbsp; <b>Type:</b> {_e(report.agent_type)} &nbsp;&nbsp; <b>Adapter:</b> {_e(report.provider or report.adapter or 'N/A')}", styles["CoverMeta"]),
+        Paragraph(f"<b>Evaluation Period:</b> {_e(period.get('from'))} to {_e(period.get('to'))} &nbsp;&nbsp; <b>Generated:</b> {_e(report.generated_at)}", styles["CoverMeta"]),
+        Spacer(1, 7*mm),
+    ]
     section_bodies = [
         _pdf_executive(data, styles, Table, TableStyle, colors),
         _pdf_coverage(data, styles, Table, TableStyle, colors),
@@ -58,16 +73,19 @@ def render_consolidated_pdf(report: ConsolidatedReport) -> bytes:
         _pdf_references(data, styles, Table, TableStyle, colors),
     ]
     for title, body in zip(report.section_order, section_bodies):
+        story.append(CondPageBreak(28*mm))
         story.append(Paragraph(_e(title), styles["SectionTitle"]))
+        story.append(_pdf_rule(Table, TableStyle, colors))
+        story.append(Spacer(1, 3))
         story.extend(body)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 10))
 
     def footer(canvas, document):
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.HexColor("#627188"))
-        canvas.drawString(16*mm, 9*mm, "EvalForge Consolidated Evaluation Report")
-        canvas.drawRightString(landscape(A4)[0] - 16*mm, 9*mm, f"Page {document.page}")
+        canvas.drawString(15*mm, 8*mm, f"EvalForge • Consolidated Evaluation Report • {report.agent_name}")
+        canvas.drawRightString(landscape(A4)[0] - 15*mm, 8*mm, f"Page {document.page}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
@@ -196,15 +214,56 @@ def _references_html(d):
 
 
 def _pdf_table(headers, rows, styles, Table, TableStyle, colors, widths=None):
-    body=[[Paragraph(_e(cell),styles["Small"]) for cell in headers]]+[[Paragraph(_e(cell),styles["Small"]) for cell in row] for row in rows]
-    table=Table(body,colWidths=widths,repeatRows=1,hAlign="LEFT")
-    table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#DDE9F7")),("TEXTCOLOR",(0,0),(-1,0),colors.HexColor("#173F73")),("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#BFCBDD")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
+    def cell(value):
+        return value if isinstance(value, Paragraph) else Paragraph(_e(value), styles["Small"])
+    body=[[cell(value) for value in headers]]+[[cell(value) for value in row] for row in rows]
+    table=Table(body,colWidths=widths,repeatRows=1,hAlign="LEFT",splitByRow=1)
+    commands=[("BACKGROUND",(0,0),(-1,0),colors.HexColor("#DDE9F7")),("TEXTCOLOR",(0,0),(-1,0),colors.HexColor("#173F73")),("LINEBELOW",(0,0),(-1,0),0.8,colors.HexColor("#7A9BC2")),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]
+    for row_index in range(2, len(body), 2):
+        commands.append(("BACKGROUND",(0,row_index),(-1,row_index),colors.HexColor("#F8FAFC")))
+    table.setStyle(TableStyle(commands))
     return table
 
 
+def _pdf_rule(Table, TableStyle, colors):
+    rule = Table([[""]], colWidths=[255*mm], rowHeights=[1.2*mm])
+    rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#2E73C5")), ("BOX", (0, 0), (-1, -1), 0, colors.white)]))
+    return rule
+
+
+def _pdf_reference_map(data):
+    return {item["evaluation_id"]: item.get("report_url") for item in data["individual_reports"] if _safe_offline_report_path(item.get("report_url"))}
+
+
+def _safe_offline_report_path(value):
+    path = str(value or "")
+    return path if path.startswith("Individual-Reports/") and ".." not in path and "\\" not in path else None
+
+
+def _pdf_report_reference(evaluation_id, data, styles):
+    evaluation_id = str(evaluation_id or "")
+    path = _pdf_reference_map(data).get(evaluation_id)
+    visible_id = evaluation_id if len(evaluation_id) <= 28 else evaluation_id[:25] + "..."
+    if not path:
+        return Paragraph(_e(visible_id or "—"), styles["Tiny"])
+    return Paragraph(f'<link href="{_e(path)}" color="#1D5FA7"><u>View Individual Report</u></link><br/><font color="#475569">{_e(path)}</font>', styles["Link"])
+
+
+def _pdf_status_label(value):
+    text = str(value or "N/A").upper().replace("_", " ")
+    return text if text else "N/A"
+
+
+def _pdf_pct(value):
+    return "N/A" if value is None else _pct(value)
+
+
 def _pdf_executive(d,s,T,TS,c):
-    x=d["executive_summary"]; period=x.get("selected_period") or {}; rows=[["Mean Selected Run Score",_pct(x["mean_selected_run_score"])],["Total Runs",x["total_evaluation_runs"]],["Unique Scenarios",x["unique_scenarios"]],["Pass / Fail / Error / Unknown",f"{x['passed_runs']} / {x['failed_runs']} / {x['technical_errors']} / {x['unknown_outcomes']}"],["Selected Evaluation Period",f"{period.get('from') or '—'} to {period.get('to') or '—'}"]]
-    return [_pdf_table(["Measure","Value"],rows,s,T,TS,c,[70*mm,95*mm]),Paragraph(_e(x["performance_overview"]),s["BodyText"])]
+    x=d["executive_summary"]
+    cards=[["MEAN SCORE","TOTAL RUNS","SCENARIOS","PASSED","FAILED","ERRORS","UNKNOWN"],[_pdf_pct(x["mean_selected_run_score"]),str(x["total_evaluation_runs"]),str(x["unique_scenarios"]),f"PASS {x['passed_runs']}",f"FAIL {x['failed_runs']}",f"ERROR {x['technical_errors']}",f"UNKNOWN {x['unknown_outcomes']}"]]
+    table=T([[Paragraph(f"<b>{_e(label)}</b><br/><font size='14'>{_e(value)}</font>",s["Small"]) for label,value in zip(cards[0],cards[1])]],colWidths=[36*mm]*7,hAlign="LEFT")
+    table.setStyle(TS([("BACKGROUND",(0,0),(-1,-1),c.HexColor("#F1F5F9")),("BOX",(0,0),(-1,-1),0.5,c.HexColor("#CBD5E1")),("INNERGRID",(0,0),(-1,-1),0.35,c.HexColor("#CBD5E1")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
+    return [table,Paragraph("Performance Overview",s["Subheading"]),Paragraph(_e(x["performance_overview"]),s["BodyText"])]
 def _pdf_coverage(d,s,T,TS,c):
     x=d["evaluation_coverage"]; rows=[[i["scenario_id"],i["total_runs"],i["valid_runs"],i["technical_errors"],i["last_evaluated"] or "—"] for i in x["scenario_coverage"]]
     items=[Paragraph(f"Unique scenarios: {x['unique_scenarios_tested']} · Total runs: {x['total_evaluation_runs']} · Valid scored: {x['valid_scored_runs']} · Technical errors: {x['technical_error_runs']} · Unknown: {x['unknown_outcome_runs']}",s["BodyText"])]
@@ -213,23 +272,32 @@ def _pdf_coverage(d,s,T,TS,c):
     items.extend([Paragraph("Metric Coverage",s["Heading3"]),_pdf_table(["Metric","Evaluated","Not Evaluated","Error","Coverage"],metric_rows,s,T,TS,c,[75*mm,28*mm,34*mm,24*mm,30*mm])])
     items.extend(Paragraph(_e(w),s["Small"]) for w in x["comparability_warnings"]); return items
 def _pdf_metrics(d,s,T,TS,c):
-    rows=[[i["name"],_pct(i["average_score"]),i["evaluated_count"],i["pass_count"],i["fail_count"],i["not_evaluated_count"],i["error_count"],i["coverage"]] for i in d["consolidated_metrics"]]
+    rows=[[i["name"],_pdf_pct(i["average_score"]),i["evaluated_count"],f"PASS {i['pass_count']}",f"FAIL {i['fail_count']}",f"N/E {i['not_evaluated_count']}",f"ERROR {i['error_count']}",i["coverage"]] for i in d["consolidated_metrics"]]
     return [_pdf_table(["Metric","Average","Evaluated","Pass","Fail","N/E","Error","Coverage"],rows,s,T,TS,c,[61*mm,22*mm,22*mm,16*mm,16*mm,16*mm,16*mm,24*mm])]
 def _pdf_scenarios(d,s,T,TS,c):
-    rows=[[i["scenario_id"],i["total_runs"],i["valid_runs"],i["technical_errors"],i["latest_valid_evaluation_id"] or "—",_pct(i["latest_valid_score"]),i["latest_valid_outcome"] or "—",i["report_url"] or "—"] for i in d["scenario_results"]]
-    return [_pdf_table(["Scenario","Runs","Valid","Errors","Latest Evaluation","Score","Outcome","Report Reference"],rows,s,T,TS,c,[38*mm,14*mm,14*mm,14*mm,39*mm,18*mm,18*mm,67*mm])] if rows else [Paragraph("No evaluations match this selection.",s["BodyText"])]
+    rows=[[i["scenario_id"],i["total_runs"],i["valid_runs"],i["technical_errors"],i["latest_valid_evaluation_id"] or "—",_pdf_pct(i["latest_valid_score"]),_pdf_status_label(i["latest_valid_outcome"]),_pdf_report_reference(i["latest_valid_evaluation_id"],d,s)] for i in d["scenario_results"]]
+    return [_pdf_table(["Scenario","Runs","Valid","Errors","Latest Evaluation","Score","Outcome","Report"],rows,s,T,TS,c,[42*mm,14*mm,14*mm,14*mm,40*mm,18*mm,20*mm,93*mm])] if rows else [Paragraph("No evaluations match this selection.",s["BodyText"])]
 def _pdf_issues(d,s):
     if not d["critical_failures"]:return [Paragraph("No persisted critical failure evidence is available.",s["BodyText"])]
-    return [Paragraph(f"<b>{_e(i['metric'] or i['category'])}</b> · {_e(i['scenario_id'])} · {_e(i['evaluation_id'])}<br/>{_e(i['evidence'])}",s["BodyText"]) for i in d["critical_failures"]]
+    blocks=[]
+    for i in d["critical_failures"]:
+        blocks.extend([Paragraph(f"<b>{_e(i['metric'] or i['category'])}</b> &nbsp; [{_e(_pdf_status_label(i.get('severity') or ('ERROR' if i['technical'] else 'FAIL')))}]",s["Subheading"]),Paragraph(f"<b>Scenario:</b> {_e(i['scenario_id'])}<br/><b>Reason / Evidence:</b> {_e(i['evidence'])}",s["BodyText"]),_pdf_report_reference(i["evaluation_id"],d,s),Spacer(1,5)])
+    return blocks
 def _pdf_recommendations(d,s):
-    return [Paragraph(f"<b>{_e(i['priority'])}: {_e(i['trigger'])}</b><br/>{_e(i['recommendation'])}<br/>Supporting evaluations: {_e(', '.join(i['evaluation_ids']))}",s["BodyText"]) for i in d["recommendations"]] or [Paragraph("No evidence-backed recommendations were generated.",s["BodyText"])]
+    if not d["recommendations"]:return [Paragraph("No evidence-backed recommendations were generated.",s["BodyText"])]
+    blocks=[]
+    for i in d["recommendations"]:
+        blocks.extend([Paragraph(f"<b>{_e(_pdf_status_label(i['priority']))}</b> — {_e(i['trigger'])}",s["Subheading"]),Paragraph(f"<b>Recommendation:</b> {_e(i['recommendation'])}<br/><b>Affected scenarios:</b> {_e(', '.join(i['affected_scenarios']) or '—')}",s["BodyText"])])
+        blocks.extend(_pdf_report_reference(evaluation_id,d,s) for evaluation_id in i["evaluation_ids"])
+        blocks.append(Spacer(1,5))
+    return blocks
 def _pdf_history(d,s):
     x=d["historical_comparison"]
     if x.get("status")=="comparable":return [Paragraph(f"<b>{_e(x['previous_batch'])} to {_e(x['current_batch'])}</b>: mean score change {_e(_pct(x.get('mean_score_change')))}; pass change {_e(x.get('pass_change'))}; fail change {_e(x.get('fail_change'))}.",s["BodyText"])]
-    return [Paragraph(f"<b>{_e(x['message'])}</b>",s["BodyText"]),*[Paragraph(_e(r),s["Small"]) for r in x["reasons"]]]
+    return [Paragraph("<b>Historical Comparison Unavailable</b>",s["Subheading"]),Paragraph(_e(x["message"]),s["BodyText"]),*[Paragraph(f"• {_e(r)}",s["Small"]) for r in x["reasons"]]]
 def _pdf_references(d,s,T,TS,c):
-    rows=[[i["scenario_id"],i["evaluation_id"],i["timestamp"] or "—",i["outcome"],_pct(i["score"]),i["technical_status"],i["report_url"]] for i in d["individual_reports"]]
-    return [_pdf_table(["Scenario","Evaluation ID","Timestamp","Outcome","Score","Technical","Report Reference"],rows,s,T,TS,c,[38*mm,36*mm,51*mm,20*mm,18*mm,40*mm,57*mm])] if rows else [Paragraph("No included evaluation runs.",s["BodyText"])]
+    rows=[[i["scenario_id"],i["evaluation_id"],i["timestamp"] or "—",_pdf_status_label(i["outcome"]),_pdf_pct(i["score"]),i["technical_status"],_pdf_report_reference(i["evaluation_id"],d,s)] for i in d["individual_reports"]]
+    return [_pdf_table(["Scenario","Evaluation ID","Timestamp","Outcome","Score","Technical","Report"],rows,s,T,TS,c,[38*mm,36*mm,47*mm,20*mm,18*mm,38*mm,64*mm])] if rows else [Paragraph("No included evaluation runs.",s["BodyText"])]
 
 
 def _docx_table(document, headers, rows):

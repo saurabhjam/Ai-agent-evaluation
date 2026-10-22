@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import io
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from docx import Document
 from fastapi import FastAPI
+from pypdf import PdfReader
 
 from app.management.consolidated_exporters import (
     render_consolidated_csv,
@@ -15,6 +17,10 @@ from app.management.consolidated_exporters import (
     render_consolidated_pdf,
 )
 from app.management.consolidated_report import METRIC_NAMES, SECTION_TITLES, ConsolidatedReportEngine
+from app.management.consolidated_package import (
+    ConsolidatedPackageError,
+    build_consolidated_report_package,
+)
 from app.management.identity import AgentIdentityResolver
 from app.management.api import router
 from app.management.service import ManagementAggregationService
@@ -191,4 +197,172 @@ def test_management_router_exposes_all_consolidated_formats():
     app.include_router(router)
     paths = {route.path for route in app.routes}
     base = "/management/agents/{agent_key}/consolidated-report"
-    assert {base, base + "/html", base + "/pdf", base + "/docx", base + "/csv"}.issubset(paths)
+    assert {base, base + "/html", base + "/pdf", base + "/docx", base + "/csv", base + "/package"}.issubset(paths)
+
+
+def test_consolidated_package_contains_filtered_evaluations_and_relative_references(tmp_path):
+    report = _engine(tmp_path, _fixture_reports()).build(
+        "chatbot:agent-1", scenario_id="scenario-a"
+    )
+    payloads = {
+        evaluation_id: _report(evaluation_id, "scenario-a", "2026-10-21T12:00:00+00:00")
+        for evaluation_id in report.selection.included_evaluation_ids
+    }
+    captured = {}
+
+    def consolidated_renderer(package_report):
+        captured["report"] = package_report
+        return b"%PDF-consolidated"
+
+    package = build_consolidated_report_package(
+        report,
+        report_loader=payloads.get,
+        individual_pdf_renderer=lambda payload: b"%PDF-" + payload["evaluation_id"].encode(),
+        consolidated_pdf_renderer=consolidated_renderer,
+    )
+
+    assert package.filename == "Portfolio-Assistant-Evaluation-Report.zip"
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        names = set(archive.namelist())
+        expected = {
+            "Consolidated-Evaluation-Report.pdf",
+            "README.txt",
+            "Individual-Reports/scenario-a_run-1.pdf",
+            "Individual-Reports/scenario-a_run-2.pdf",
+        }
+        assert names == expected
+        assert archive.testzip() is None
+        assert "old" not in archive.read("README.txt").decode()
+
+    bundled_ids = {item.evaluation_id for item in captured["report"].individual_reports}
+    assert bundled_ids == set(report.selection.included_evaluation_ids)
+    assert all(item.report_url.startswith("Individual-Reports/") for item in captured["report"].individual_reports)
+    assert "localhost" not in " ".join(item.report_url for item in captured["report"].individual_reports)
+    assert all(item.report_url.startswith("/evaluations/") for item in report.individual_reports)
+
+
+def test_consolidated_package_fails_atomically_when_an_individual_pdf_fails(tmp_path):
+    report = _engine(tmp_path, _fixture_reports()).build(
+        "chatbot:agent-1", scenario_id="scenario-a"
+    )
+
+    def broken_renderer(payload):
+        if payload["evaluation_id"] == "run-2":
+            raise ValueError("render failed")
+        return b"%PDF-ok"
+
+    try:
+        build_consolidated_report_package(
+            report,
+            report_loader=lambda evaluation_id: {"evaluation_id": evaluation_id},
+            individual_pdf_renderer=broken_renderer,
+            consolidated_pdf_renderer=lambda _: b"%PDF-consolidated",
+        )
+    except ConsolidatedPackageError as exc:
+        assert "run-2" in str(exc)
+    else:
+        raise AssertionError("Package generation should fail when any individual PDF fails")
+
+
+def test_consolidated_package_uses_real_pdf_renderers(tmp_path):
+    report = _engine(tmp_path, _fixture_reports()).build(
+        "chatbot:agent-1", scenario_id="scenario-a", status="pass"
+    )
+    payloads = {
+        evaluation_id: _report(evaluation_id, "scenario-a", "2026-10-21T12:00:00+00:00")
+        for evaluation_id in report.selection.included_evaluation_ids
+    }
+
+    package = build_consolidated_report_package(report, report_loader=payloads.get)
+
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        assert archive.read("Consolidated-Evaluation-Report.pdf").startswith(b"%PDF-")
+        assert archive.read("Individual-Reports/scenario-a_run-2.pdf").startswith(b"%PDF-")
+
+
+def _pdf_links(pdf_bytes):
+    links = []
+    for page in PdfReader(io.BytesIO(pdf_bytes)).pages:
+        for annotation_ref in page.get("/Annots") or []:
+            annotation = annotation_ref.get_object()
+            action = annotation.get("/A")
+            if action and action.get("/URI"):
+                links.append(str(action["/URI"]))
+    return links
+
+
+def test_package_pdf_links_sections_to_files_that_exist_in_archive(tmp_path):
+    report = _engine(tmp_path, _fixture_reports()).build(
+        "chatbot:agent-1", scenario_id="scenario-a"
+    )
+    payloads = {
+        evaluation_id: _report(evaluation_id, "scenario-a", "2026-10-21T12:00:00+00:00")
+        for evaluation_id in report.selection.included_evaluation_ids
+    }
+    package = build_consolidated_report_package(report, report_loader=payloads.get)
+
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        pdf = archive.read("Consolidated-Evaluation-Report.pdf")
+        links = _pdf_links(pdf)
+        names = set(archive.namelist())
+
+    assert links.count("Individual-Reports/scenario-a_run-1.pdf") >= 3
+    assert links.count("Individual-Reports/scenario-a_run-2.pdf") >= 2
+    assert set(links) <= names
+    assert all("localhost" not in link for link in links)
+    assert all(":\\" not in link and not link.startswith("file:") for link in links)
+
+
+def test_standalone_pdf_has_no_offline_package_links_and_na_is_preserved(tmp_path):
+    report = _engine(tmp_path, _fixture_reports()).build(
+        "chatbot:agent-1", scenario_id="does-not-exist"
+    )
+    pdf = render_consolidated_pdf(report)
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages)
+
+    assert not [link for link in _pdf_links(pdf) if link.startswith("Individual-Reports/")]
+    assert "N/A" in text
+
+
+def test_consolidated_pdf_handles_many_runs_long_names_and_long_failure_evidence(tmp_path):
+    reports = []
+    for index in range(12):
+        scenario = f"scenario-{index}-" + ("long-name-" * 8)
+        failure = [{
+            "metric_name": "Response Quality",
+            "category": "Conversation Validation",
+            "severity": "high",
+            "reason": "Persisted evidence " + ("with detailed client-visible context. " * 35),
+        }]
+        reports.append(_report(
+            f"run-{index}", scenario, f"2026-10-21T{10 + index:02d}:00:00+00:00",
+            score=0.45, passed=False, failure=failure,
+        ))
+    report = _engine(tmp_path, reports).build("chatbot:agent-1")
+
+    pdf = render_consolidated_pdf(report)
+    reader = PdfReader(io.BytesIO(pdf))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    assert pdf.startswith(b"%PDF-")
+    assert len(reader.pages) >= 5
+    assert all(title in text for title in SECTION_TITLES)
+    assert "Persisted evidence" in text
+
+
+def test_package_sanitizes_unsafe_scenario_names_without_changing_mapping(tmp_path):
+    reports = [_report("eval-safe", "../../unsafe\\scenario:name", "2026-10-21T12:00:00+00:00")]
+    report = _engine(tmp_path, reports).build("chatbot:agent-1")
+    package = build_consolidated_report_package(
+        report,
+        report_loader=lambda evaluation_id: {"evaluation_id": evaluation_id},
+        individual_pdf_renderer=lambda _: b"%PDF-individual",
+        consolidated_pdf_renderer=lambda _: b"%PDF-consolidated",
+    )
+
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        individual = [name for name in archive.namelist() if name.startswith("Individual-Reports/")]
+
+    assert individual == ["Individual-Reports/unsafe-scenario-name_eval-safe.pdf"]
+    assert ".." not in individual[0]
+    assert "\\" not in individual[0]
