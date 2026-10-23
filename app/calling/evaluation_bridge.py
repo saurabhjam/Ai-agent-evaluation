@@ -8,6 +8,7 @@ from app.calling.calling_result_converter import CallingResultConverter
 from app.calling.evaluation_adapter import CallingEvaluationAdapter
 from app.calling.evaluation_context import CallingEvaluationContext
 from app.calling.execution_result import CallingExecutionResult
+from app.calling.failure_analysis import CallingFailureAnalyzer
 from app.evaluation_service import EvaluationResult
 from app.schemas import TestScenario
 
@@ -22,6 +23,7 @@ class CallingEvaluationBridge:
 
     converter: CallingResultConverter = field(default_factory=CallingResultConverter)
     adapter: CallingEvaluationAdapter = field(default_factory=CallingEvaluationAdapter)
+    failure_analyzer: CallingFailureAnalyzer = field(default_factory=CallingFailureAnalyzer)
 
     def build_context(
         self,
@@ -40,9 +42,26 @@ class CallingEvaluationBridge:
         scenario: TestScenario,
     ) -> EvaluationResult:
         """Convert a calling result and invoke the existing evaluation service."""
-        if calling_result.normalized_conversation is None:
-            execution_result = self.converter.to_execution_result(calling_result)
-            return self.adapter.evaluate(execution_result, scenario)
-        self.build_context(calling_result, scenario)
+        if calling_result.normalized_conversation is not None:
+            self.build_context(calling_result, scenario)
         execution_result = self.converter.to_execution_result(calling_result)
-        return self.adapter.evaluate(execution_result, scenario)
+        evaluation = self.adapter.evaluate(execution_result, scenario)
+        if not evaluation.success:
+            return evaluation
+        source_messages = {
+            message.turn_index: message
+            for message in (calling_result.normalized_conversation.messages if calling_result.normalized_conversation else [])
+        }
+        conversation = []
+        for turn in evaluation.conversation:
+            if str((turn.metadata or {}).get("speaker") or "").lower() == "system":
+                continue
+            source = source_messages.get(turn.turn_index)
+            metadata = dict(turn.metadata or {})
+            if source is not None and source.timestamp is not None:
+                metadata["timestamp"] = source.timestamp
+            conversation.append(turn.model_copy(update={"metadata": metadata or None}))
+        evaluation = evaluation.model_copy(update={"conversation": conversation})
+        return evaluation.model_copy(update={
+            "failure_analysis": self.failure_analyzer.analyze(evaluation, calling_result) or None,
+        })

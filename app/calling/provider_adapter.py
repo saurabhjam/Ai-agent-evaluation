@@ -110,6 +110,16 @@ class CallProviderAdapter(ABC):
             time.sleep(max(poll_interval_seconds, 0.1))
         return current.model_copy(update={"status": CallStatus.timed_out})
 
+    def wait_for_artifacts(
+        self,
+        session: CallSession,
+        *,
+        timeout_seconds: float = 0,
+        poll_interval_seconds: float = 1,
+    ) -> CallSession:
+        """Allow a provider to wait for asynchronously finalized evidence."""
+        return session
+
     @abstractmethod
     def end_call(self, session: CallSession) -> CallSession:
         """End a call and return the updated session."""

@@ -507,12 +507,14 @@ def test_vapi_voice_transport_handles_speech_stop_before_audio_chunks():
     assert duration < 2.0
 
 
-def test_vapi_voice_transport_completes_on_final_transcript():
+def test_vapi_voice_transport_waits_for_speech_stop_after_final_transcript():
     speech_frame = b"\x50\x20" * 1200
     messages = [
-        speech_frame,
+        json.dumps({"type": "speech-update", "role": "assistant", "status": "started"}),
         speech_frame,
         json.dumps({"type": "transcript", "role": "assistant", "transcriptType": "final", "transcript": "Hello,."}),
+        speech_frame,
+        json.dumps({"type": "speech-update", "role": "assistant", "status": "stopped"}),
     ]
 
     class FinalTranscriptSocket(FakeSocket):
@@ -534,8 +536,72 @@ def test_vapi_voice_transport_completes_on_final_transcript():
 
     audio = transport.receive_audio(timeout_seconds=5)
     with wave.open(io.BytesIO(audio), "rb") as wav:
-        duration = wav.getnframes() / wav.getframerate()
-    assert duration < 2.0
+        assert wav.readframes(wav.getnframes()) == speech_frame * 2
+
+
+class ArtifactResponse:
+    def __init__(self, status_code=206, content_type="audio/wav", content=b"a"):
+        self.status_code = status_code
+        self.headers = {"content-type": content_type}
+        self.content = content
+
+    def iter_content(self, chunk_size=1):
+        if self.content:
+            yield self.content[:chunk_size]
+
+    def close(self):
+        pass
+
+
+def test_vapi_wait_for_artifacts_retries_until_recording_is_downloadable(monkeypatch):
+    call_bodies = [_completed_body(), _completed_body()]
+    recording_responses = [ArtifactResponse(400, "application/json"), ArtifactResponse()]
+    sleeps = []
+
+    def get(url, **kwargs):
+        if url.endswith("/call/call-1"):
+            return Response(call_bodies.pop(0))
+        return recording_responses.pop(0)
+
+    monkeypatch.setattr("app.calling.providers.vapi.requests.get", get)
+    monkeypatch.setattr("app.calling.providers.vapi.time.sleep", lambda value: sleeps.append(value))
+
+    session = _in_progress_session().model_copy(update={"status": CallStatus.completed})
+    result = _vapi_provider().wait_for_artifacts(session, timeout_seconds=5, poll_interval_seconds=0.1)
+
+    assert result.provider_metadata["artifact_readiness"] == "ready"
+    assert sleeps == [0.1]
+
+
+def test_vapi_wait_for_artifacts_times_out_when_recording_never_materializes(monkeypatch):
+    monkeypatch.setattr(
+        "app.calling.providers.vapi.requests.get",
+        lambda url, **kwargs: Response(_completed_body()) if url.endswith("/call/call-1") else ArtifactResponse(400),
+    )
+    times = iter([0.0, 0.0, 0.1, 0.2, 0.3])
+    monkeypatch.setattr("app.calling.providers.vapi.time.monotonic", lambda: next(times))
+    monkeypatch.setattr("app.calling.providers.vapi.time.sleep", lambda *_args: None)
+
+    session = _in_progress_session().model_copy(update={"status": CallStatus.completed})
+    result = _vapi_provider().wait_for_artifacts(session, timeout_seconds=0.25, poll_interval_seconds=0.1)
+
+    assert result.status == CallStatus.completed
+    assert result.provider_metadata["artifact_readiness"] == "timed_out"
+
+
+def test_vapi_wait_for_artifacts_rejects_zero_byte_recording(monkeypatch):
+    monkeypatch.setattr(
+        "app.calling.providers.vapi.requests.get",
+        lambda url, **kwargs: Response(_completed_body()) if url.endswith("/call/call-1") else ArtifactResponse(content=b""),
+    )
+    times = iter([0.0, 0.0, 0.1])
+    monkeypatch.setattr("app.calling.providers.vapi.time.monotonic", lambda: next(times))
+    monkeypatch.setattr("app.calling.providers.vapi.time.sleep", lambda *_args: None)
+
+    session = _in_progress_session().model_copy(update={"status": CallStatus.completed})
+    result = _vapi_provider().wait_for_artifacts(session, timeout_seconds=0.05, poll_interval_seconds=0.1)
+
+    assert result.provider_metadata["artifact_readiness"] == "timed_out"
 
 
 def test_vapi_voice_transport_times_out_when_only_silence_received():

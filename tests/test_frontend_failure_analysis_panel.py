@@ -20,6 +20,14 @@ def test_failure_panel_reads_from_evaluation_result_failure_analysis():
     assert "item.metric_name === metricName" in APP_JS
 
 
+def test_calling_recordings_use_evalforge_artifact_urls_only():
+    recording_renderer = APP_JS.split("_renderCallingRecordings(recordings, status)", 1)[1].split("  _callingRecordingLabel(recording, index, total)", 1)[0]
+    assert "recording.playback_url" in recording_renderer
+    assert "recording.download_url" in recording_renderer
+    assert "providerJson.recordingUrl" not in recording_renderer
+    assert "recording.remote_url" not in recording_renderer
+
+
 def test_failure_panel_empty_state_is_available():
     assert "No failure analysis available." in APP_JS
     assert "openFailureAnalysis(metricName)" in APP_JS

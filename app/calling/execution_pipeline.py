@@ -22,6 +22,7 @@ from app.calling.voice_transport import (
     transport_session_to_call_session,
 )
 from app.calling.voice_conversation_runner import VoiceConversationRunner
+from app.calling.simulator import StatefulCallingSimulator
 from app.calling import diagnostics
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,8 @@ class CallingExecutionPipeline:
                 )
 
             from app.calling.providers.mock import MockCallProvider
+            transport_transcript = None
+            transport_recordings = []
             if configured_provider == "mock" or isinstance(provider, MockCallProvider):
                 runner = CallSessionRunner(provider_adapter=provider)
                 runner_result = runner.run_mock_call(
@@ -87,7 +90,6 @@ class CallingExecutionPipeline:
                 artifacts = list(runner_result.conversation_evidence.attachments)
             else:
                 # Real execution path
-                transport_transcript = None
                 provider_voice_transport = provider.create_voice_transport()
                 if configured_provider == "vapi":
                     logger.info("Provider voice transport available: %s", provider_voice_transport is not None)
@@ -115,13 +117,15 @@ class CallingExecutionPipeline:
                     if configured_provider == "vapi":
                         logger.info("Provider-native call session created: session_id=%s provider_call_id=%s", session.session_id, session.provider_call_id)
                         logger.info("Starting VoiceConversationRunner...")
-                    transport_transcript = _voice_conversation_runner(context).run(
+                    conversation_runner = _voice_conversation_runner(context)
+                    transport_transcript = conversation_runner.run(
                         persona=context.scenario.persona,
                         transport=provider_voice_transport,
                         session=transport_session,
                         session_id=session.session_id,
                         run_id=session.run_id,
                     )
+                    transport_recordings.extend(conversation_runner.recordings)
                     if configured_provider == "vapi":
                         logger.info("Conversation finished")
                         logger.info("RawCallTranscript turns: %d", len(transport_transcript.turns))
@@ -156,13 +160,15 @@ class CallingExecutionPipeline:
                             },
                         )
                         if _transport_supports_conversation(transport):
-                            transport_transcript = _voice_conversation_runner(context).run(
+                            conversation_runner = _voice_conversation_runner(context)
+                            transport_transcript = conversation_runner.run(
                                 persona=context.scenario.persona,
                                 transport=transport,
                                 session=transport_session,
                                 session_id=session.session_id,
                                 run_id=session.run_id,
                             )
+                            transport_recordings.extend(conversation_runner.recordings)
                     else:
                         raise RuntimeError(_unsupported_inbound_message(configured_provider, provider_capabilities))
 
@@ -171,6 +177,8 @@ class CallingExecutionPipeline:
                     logger.info("Real provider session assertion passed")
                 
                 session = provider.wait_for_completion(session)
+                if session.status == CallStatus.completed and not transport_recordings:
+                    session = provider.wait_for_artifacts(session)
                 
                 provider_events = provider.fetch_events(session)
                 recording = provider.fetch_recording(session)
@@ -196,10 +204,11 @@ class CallingExecutionPipeline:
                         f"Transcript unavailable for real provider '{configured_provider}' and call '{session.provider_call_id}'."
                     )
                     
+                recordings = [*transport_recordings, *([recording] if recording else [])]
                 evidence = EvidenceBuilder().build(
                     session=session,
                     events=provider_events,
-                    recordings=[recording] if recording else [],
+                    recordings=recordings,
                     transcript=transcript_obj,
                     artifacts=[],
                     rag_context=context.scenario.rag_context,
@@ -249,6 +258,7 @@ class CallingExecutionPipeline:
                     execution_metadata={
                         "scenario_id": context.scenario.scenario_id,
                         "provider": context.provider_config.provider_name,
+                        "simulator_contract_violations": _simulator_contract_violations(transport_transcript),
                     },
                     provider_metadata=session.provider_metadata,
                     duration_seconds=_duration_seconds(started_at, utc_now_iso()),
@@ -276,6 +286,7 @@ class CallingExecutionPipeline:
                     "provider": context.provider_config.provider_name,
                     "context_run_id": context.run_id,
                     "context_session_id": context.session_id,
+                    "simulator_contract_violations": _simulator_contract_violations(transport_transcript),
                 },
                 provider_metadata=session.provider_metadata,
                 duration_seconds=_duration_seconds(started_at, utc_now_iso()),
@@ -463,6 +474,12 @@ def _assert_real_provider_artifact(configured_provider: str, artifact) -> None:
         )
 
 
+def _simulator_contract_violations(transcript) -> list[dict]:
+    if transcript is None:
+        return []
+    return list((transcript.metadata or {}).get("simulator_contract_violations") or [])
+
+
 def _client_agent_phone_number(context: CallingExecutionContext, *, fallback: str) -> str:
     settings = context.provider_config.settings or {}
     candidate = (
@@ -530,6 +547,7 @@ def _voice_conversation_runner(context: CallingExecutionContext) -> VoiceConvers
     except ImportError as exc:
         raise RuntimeError("Voice conversation runner requires the existing voice STT/TTS providers.") from exc
     return VoiceConversationRunner(
+        simulator=StatefulCallingSimulator(context.scenario),
         max_turns=context.scenario.max_turns,
         receive_timeout_seconds=float(settings.get("receive_timeout_seconds") or 30.0),
         stt_provider=FasterWhisperSTT(

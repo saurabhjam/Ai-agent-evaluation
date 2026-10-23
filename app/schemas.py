@@ -51,6 +51,14 @@ class TestScenario(BaseModel):
     scenario_id: str = Field(..., min_length=3, max_length=80)
     agent: AgentConfig
     persona: Persona
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Scenario facts available to the simulated user",
+    )
+    behavior: list[str] = Field(
+        default_factory=list,
+        description="Behavior instructions and constraints for the simulated user",
+    )
     steps: Optional[list[dict[str, Any]]] = Field(
         default=None,
         description="Optional explicit chatbot steps, e.g. send/click_button actions.",

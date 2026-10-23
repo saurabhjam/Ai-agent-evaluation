@@ -69,11 +69,13 @@ def test_chatbot_execution_success(mock_cm_class, mock_generate, mock_scenario):
     mock_adapter.send_message.assert_called_once_with("Hello", agent_prompt=None, attachments=None)
 
 
+@patch("app.executor.decide_next_user_action")
 @patch("app.executor.generate_next_user_turn")
 @patch("app.executor.ConnectionManager")
 def test_chatbot_execution_selects_interactive_option_before_generating_text(
     mock_cm_class,
     mock_generate,
+    mock_decide,
 ):
     scenario = TestScenario(
         scenario_id="interactive_scenario",
@@ -116,6 +118,11 @@ def test_chatbot_execution_selects_interactive_option_before_generating_text(
         ],
     ]
     mock_generate.return_value = {"message": "I need maintenance help."}
+    mock_decide.return_value = {
+        "message": "What maintenance tickets are open?",
+        "attachments": None,
+        "selected_option_index": 1,
+    }
 
     mock_conv = MagicMock()
     mock_conv.messages = []
@@ -130,11 +137,13 @@ def test_chatbot_execution_selects_interactive_option_before_generating_text(
     assert mock_adapter.send_message.call_args_list[1].args == ("What maintenance tickets are open?",)
 
 
+@patch("app.executor.decide_next_user_action")
 @patch("app.executor.generate_next_user_turn")
 @patch("app.executor.ConnectionManager")
 def test_chatbot_execution_uses_quick_reply_subtype_as_interactive_option(
     mock_cm_class,
     mock_generate,
+    mock_decide,
 ):
     scenario = TestScenario(
         scenario_id="quick_reply_scenario",
@@ -170,6 +179,11 @@ def test_chatbot_execution_uses_quick_reply_subtype_as_interactive_option(
         [],
     ]
     mock_generate.return_value = {"message": "[END_CONVERSATION]"}
+    mock_decide.return_value = {
+        "message": "I want to book an appointment.",
+        "attachments": None,
+        "selected_option_index": 0,
+    }
     mock_conv = MagicMock()
     mock_conv.messages = []
     mock_adapter.get_conversation.return_value = mock_conv
@@ -181,6 +195,65 @@ def test_chatbot_execution_uses_quick_reply_subtype_as_interactive_option(
     mock_generate.assert_called_once()
     mock_adapter.send_message.assert_called_once_with(
         "I want to book an appointment.",
+        agent_prompt=None,
+        attachments=None,
+    )
+
+
+@patch("app.executor.decide_next_user_action")
+@patch("app.executor.generate_next_user_turn")
+@patch("app.executor.ConnectionManager")
+def test_chatbot_execution_uses_goal_directed_fallback_when_options_are_unrelated(
+    mock_cm_class,
+    mock_generate,
+    mock_decide,
+):
+    scenario = TestScenario(
+        scenario_id="generic_redirect_scenario",
+        agent=AgentConfig(channel="chatbot", adapter="rest"),
+        persona=Persona(
+            name="Test User",
+            goal="Resolve the configured customer request",
+            tone="polite",
+        ),
+        max_turns=2,
+    )
+    adapter = MagicMock()
+    mock_cm_class.return_value.create_adapter.return_value = adapter
+    adapter.get_transcript.side_effect = [
+        [
+            ConversationMessage(
+                role="agent",
+                content="Choose one of these unrelated destinations.",
+                turn_index=0,
+                metadata={
+                    "components": [
+                        {"type": "button", "message": "Unrelated destination A"},
+                        {"type": "button", "message": "Unrelated destination B"},
+                    ]
+                },
+            )
+        ],
+        [],
+    ]
+    mock_decide.return_value = {
+        "message": "Neither option helps; I still need the configured request resolved.",
+        "attachments": None,
+        "selected_option_index": None,
+    }
+    mock_generate.return_value = {"message": "[END_CONVERSATION]", "attachments": None}
+    adapter.get_conversation.return_value = MagicMock(messages=[])
+
+    result = ScenarioExecutor(mock_cm_class.return_value).execute(
+        AgentConnection(id="1", name="Test", type="chatbot", adapter="rest"),
+        scenario,
+    )
+
+    assert result.success
+    mock_generate.assert_called_once()
+    adapter.click_button.assert_not_called()
+    adapter.send_message.assert_called_once_with(
+        "Neither option helps; I still need the configured request resolved.",
         agent_prompt=None,
         attachments=None,
     )

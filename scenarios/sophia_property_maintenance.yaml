@@ -10,29 +10,45 @@ persona:
   tone: "Professional and concise"
 
 context:
-  property_issue: "Water is leaking from the ceiling in one of the units."
-  unit_number: "Do not invent a unit number."
-  urgency: "The leak is getting worse."
+  property_name: "Mason & Main - B"
+  unit_number: "B1207"
+  maintenance_issue: "Water is leaking from the ceiling in the unit."
+  location_in_unit: "Kitchen"
+  urgency: "Urgent"
+  issue_progress: "The leak is getting worse."
+  description: "Water is leaking from the kitchen ceiling and the leak is getting worse."
 
 behavior:
-  - Tell Sophia that there is a water leak in a property unit.
-  - Explain that the leak is getting worse.
-  - Ask how to report the maintenance issue.
-  - Ask what information is required to create the maintenance request.
-  - If Sophia asks for the unit number, explain that you need to provide it later rather than inventing one.
-  - Ask whether the issue can be marked as urgent.
-  - Answer Sophia's clarification questions naturally.
-  - Do not invent property, tenant, unit, or maintenance information.
-  - Continue until Sophia explains the appropriate maintenance process.
+  - Tell Sophia that there is a water leak coming from the kitchen ceiling.
+  - Explain that the leak is getting worse and needs urgent attention.
+  - Ask Sophia how to report the maintenance issue.
+  - If Sophia asks for the property or building, provide "Mason & Main - B".
+  - If Sophia asks for the unit number, provide "B1207".
+  - If Sophia asks where the issue is located, explain that the leak is in the kitchen ceiling.
+  - If Sophia asks for a description, explain that water is leaking from the kitchen ceiling and the leak is getting worse.
+  - If Sophia asks about urgency or priority, explain that the issue is urgent.
+  - Provide requested maintenance details naturally when Sophia asks for them.
+  - Do not change or invent facts beyond the information provided in the scenario.
+  - Do not select unrelated suggestions about residents, rent, vacancies, portfolio analytics, or unrelated maintenance requests.
+  - Stay focused on creating or reporting this specific maintenance request.
+  - Ask what will happen after the maintenance request is submitted.
+  - Ask whether the issue has been successfully recorded or submitted.
+  - Continue until Sophia completes the maintenance-request workflow, clearly explains why it cannot be completed, or provides the appropriate next step.
 
 success_criteria:
-  - Sophia understands that the user is reporting a maintenance issue.
-  - Sophia identifies that the issue involves a water leak.
-  - Sophia asks for relevant information when required.
-  - Sophia does not assume or invent missing information.
-  - Sophia explains the appropriate maintenance/request process.
-  - Sophia handles the urgency appropriately.
+  - Sophia understands that the user wants to report a maintenance issue.
+  - Sophia correctly identifies the property as "Mason & Main - B".
+  - Sophia correctly identifies the unit as "B1207".
+  - Sophia correctly understands that water is leaking from the kitchen ceiling.
+  - Sophia understands that the leak is getting worse.
+  - Sophia treats the issue as urgent when appropriate.
+  - Sophia asks for relevant information required to create the maintenance request.
+  - Sophia does not redirect the user to unrelated portfolio, resident, rent, or vacancy workflows.
+  - Sophia creates/submits the maintenance request if that capability is supported.
+  - If submission is not supported, Sophia clearly explains the correct next step.
+  - Sophia explains what happens after the maintenance request is reported.
+  - Sophia does not claim that the request was created unless it was actually created.
   - Sophia maintains a professional and helpful tone.
-  - The conversation completes naturally.
+  - The conversation reaches a clear outcome.
 
 pass_threshold: 0.70

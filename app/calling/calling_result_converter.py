@@ -50,7 +50,10 @@ class CallingResultConverter:
         completed_at = datetime.now(timezone.utc).isoformat()
         call_session = calling_result.call_session
         conversation = calling_result.normalized_conversation
-        transcript = list(conversation.messages) if conversation else []
+        transcript = [
+            message for message in conversation.messages
+            if message.role != "system"
+        ] if conversation else []
         session_id = call_session.session_id if call_session else None
         provider_name = call_session.provider_name if call_session else self.adapter
         connection_id = (

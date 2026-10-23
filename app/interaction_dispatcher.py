@@ -27,19 +27,35 @@ from app.schemas import TestScenario
 logger = logging.getLogger(__name__)
 
 
-def dispatch_interaction(*, adapter: Any, scenario: TestScenario, transcript: list[Any]) -> bool:
+def dispatch_interaction(
+    *,
+    adapter: Any,
+    scenario: TestScenario,
+    transcript: list[Any],
+    allow_selectable: bool = True,
+    selected_component: dict[str, Any] | None = None,
+) -> bool:
     """Handle the latest normalized UI component if the adapter supports it."""
     latest_agent = _latest_agent_message(transcript)
     if latest_agent is None:
         return False
 
-    components = _message_components(latest_agent)
+    components = [selected_component] if selected_component is not None else _message_components(latest_agent)
     if not components and not _message_has_structured_components(latest_agent):
         components = detect_fallback_interactions(_message_attr(latest_agent, "content", ""))
     if not components:
         return False
 
-    ordered_components = _rank_selectable_components(components, scenario, latest_agent)
+    if not allow_selectable and selected_component is None:
+        components = [
+            component
+            for component in components
+            if _component_type(component) not in {"button", "quick_reply", "option"}
+        ]
+        if not components:
+            return False
+
+    ordered_components = components if selected_component is not None else _rank_selectable_components(components, scenario, latest_agent)
     for component in ordered_components:
         if not isinstance(component, dict):
             continue
@@ -530,27 +546,9 @@ def _rank_selectable_components(
     if not any(_component_type(component) in selectable for component in components):
         return components
 
-    goal_text = " ".join(
-        part
-        for part in [
-            scenario.persona.goal,
-            scenario.persona.tone,
-            scenario.persona.edge_case or "",
-            _message_attr(latest_agent, "content", "") or "",
-        ]
-        if part
-    )
-    goal_tokens = _tokens(goal_text)
-
-    def score(component: dict[str, Any]) -> int:
-        if _component_type(component) not in selectable:
-            return -1
-        option_text = " ".join(
-            _first_text(component, "label", "message", "value", "text", "title", "id").split()
-        )
-        return len(goal_tokens & _tokens(option_text))
-
-    return sorted(components, key=score, reverse=True)
+    # Semantic selection is owned by app.simulator. This legacy/default path
+    # preserves provider order for callers that have not supplied a decision.
+    return components
 
 
 def _tokens(text: str) -> set[str]:

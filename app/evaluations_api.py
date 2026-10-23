@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from app.log_stream import log_manager
 from app.interaction_protocol import interaction_manager
 
 from app.evaluation_store import delete_evaluation_report, get_evaluation_report, list_evaluation_reports
+from app.calling.recording_artifacts import recording_response
 from app.report_engine import (
     build_enterprise_report,
     build_enterprise_report_docx,
@@ -256,6 +257,22 @@ def get_evaluation_recordings(evaluation_id: str) -> dict[str, Any]:
         "conversation_audio": report.get("conversation_audio") or {},
         "recording_status": report.get("recording_status") or "unavailable",
     }
+
+
+@router.get("/{evaluation_id}/recordings/{artifact_id}/playback")
+def play_evaluation_recording(evaluation_id: str, artifact_id: str, request: Request) -> Response:
+    report = get_evaluation_report(evaluation_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    return recording_response(report, artifact_id, request, download=False)
+
+
+@router.get("/{evaluation_id}/recordings/{artifact_id}/download")
+def download_evaluation_recording(evaluation_id: str, artifact_id: str, request: Request) -> Response:
+    report = get_evaluation_report(evaluation_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    return recording_response(report, artifact_id, request, download=True)
 
 
 def _summary(report: dict[str, Any]) -> dict[str, Any]:

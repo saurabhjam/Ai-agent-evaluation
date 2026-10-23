@@ -5,6 +5,7 @@ import pytest
 from app.calling.calling_result_converter import CallingResultConverter
 from app.calling.evaluation_runner import CallingEvaluationRuntimeRunner
 from app.calling.execution_result import CallingExecutionResult, CallingExecutionStatus
+from app.models.conversation import ConversationMessage
 from app.schemas import AgentConfig, Persona, TestScenario
 
 
@@ -57,3 +58,21 @@ def test_calling_result_converter_rejects_missing_normalized_conversation_contex
 
     with pytest.raises(ValueError, match="missing normalized conversation"):
         CallingResultConverter().to_evaluation_context(result, scenario_id="missing")
+
+
+def test_calling_result_converter_excludes_system_prompt_from_evaluator_transcript():
+    calling_result = CallingEvaluationRuntimeRunner().run(_scenario())
+    conversation = calling_result.normalized_conversation
+    conversation = conversation.model_copy(update={
+        "messages": [
+            ConversationMessage(role="system", content="Internal provider prompt", turn_index=-1),
+            *conversation.messages,
+        ]
+    })
+
+    execution_result = CallingResultConverter().to_execution_result(
+        calling_result.model_copy(update={"normalized_conversation": conversation})
+    )
+
+    assert all(message.role != "system" for message in execution_result.transcript)
+    assert all(message.content != "Internal provider prompt" for message in execution_result.transcript)

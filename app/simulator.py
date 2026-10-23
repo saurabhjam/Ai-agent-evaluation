@@ -12,6 +12,7 @@ import logging
 import time
 from groq import Groq
 import re
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,22 @@ Your goal: {goal}
 Your tone: {tone}
 {edge_case_line}
 
+Scenario facts (authoritative JSON):
+{scenario_context}
+
+Behavior instructions and hard constraints (authoritative JSON):
+{behavior_constraints}
+
 Rules:
 - Speak ONLY as the user, in first person. Never break character.
 - Never reveal you are an AI or that this is a test.
 - Keep each message short and natural, like a real chat message (1-3 sentences).
 - Base the reply on the latest agent message, the persona goal, and the conversation history.
+- Treat scenario facts as the source of truth for material details. You may paraphrase them, but must not replace or contradict them.
+- Treat negative behavior instructions (for example, do not invent, disclose, assume, or provide) as hard constraints that override conversational convenience.
+- Never introduce a material fact unless it is supplied by the scenario, established in the conversation, or offered by the agent as a workflow choice that the scenario permits you to choose.
+- If requested information is unavailable or prohibited by the scenario, say it is unavailable and follow any scenario instruction about how to respond. Do not fabricate it to advance the workflow.
+- Agent-provided information may be used only when it advances the goal and does not contradict scenario facts or behavior constraints.
 - Do not restart the conversation or repeat the opening request after the conversation has started.
 - Do not reveal persona information until the agent asks for it or it is needed to satisfy the latest request.
 - If the agent asks for information you already provided, politely repeat only that information.
@@ -87,11 +99,21 @@ _TIME_PATTERN = re.compile(r"\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b")
 _PHONE_PATTERN = re.compile(r"\b(?:\+?\d[\d\s().-]{7,}\d)\b")
 
 
-def _build_prompt(persona: Persona, transcript: list[Any]) -> list[dict]:
+def _build_prompt(
+    persona: Persona,
+    transcript: list[Any],
+    *,
+    scenario_context: dict[str, Any] | None = None,
+    behavior_constraints: list[str] | None = None,
+) -> list[dict]:
     edge_case_line = f"Edge-case behavior to weave in: {persona.edge_case}" if persona.edge_case else ""
     system = SYSTEM_TEMPLATE.format(
-        name=persona.name, goal=persona.goal, tone=persona.tone,
+        name=persona.name,
+        goal=persona.goal,
+        tone=persona.tone,
         edge_case_line=edge_case_line,
+        scenario_context=json.dumps(scenario_context or {}, ensure_ascii=True, sort_keys=True),
+        behavior_constraints=json.dumps(behavior_constraints or [], ensure_ascii=True),
     )
 
     history_lines = []
@@ -108,7 +130,11 @@ def _build_prompt(persona: Persona, transcript: list[Any]) -> list[dict]:
             latest_agent_message = content
     history = "\n".join(history_lines) if history_lines else "(conversation not started yet)"
     prior_user_messages = "\n".join(f"- {line}" for line in user_lines) if user_lines else "- None yet"
-    provided_items, missing_items = _persona_information_state(persona, user_lines)
+    provided_items, missing_items = _persona_information_state(
+        persona,
+        user_lines,
+        scenario_context=scenario_context,
+    )
     request_analysis = _analyze_latest_agent_request(persona, latest_agent_message, user_lines)
     provided_info = "\n".join(f"- {item}" for item in provided_items) if provided_items else "- None detected yet"
     missing_info = "\n".join(f"- {item}" for item in missing_items) if missing_items else "- None detected"
@@ -127,7 +153,11 @@ def _build_prompt(persona: Persona, transcript: list[Any]) -> list[dict]:
         f"Prior user messages:\n{prior_user_messages}\n\n"
         f"Information already provided:\n{provided_info}\n\n"
         f"Information not yet provided:\n{missing_info}\n\n"
-        "Decision priority: first answer the latest agent question using only unanswered requested fields. "
+        "Decision priority: (1) preserve scenario truth and hard constraints, "
+        "(2) continue pursuing the persona goal, (3) use conversation state, "
+        "(4) select or use agent-provided workflow information only when compatible, and "
+        "(5) otherwise respond naturally without fabricating missing material information. "
+        "First answer the latest agent question using only supported, unanswered requested fields. "
         "Do not restate the overall goal unless the latest agent message specifically asks what you need or how they can help. "
         "Decide the next user response from the current state. Answer the latest agent message directly. "
         "Do not re-send the opening request once a prior user message exists. "
@@ -141,8 +171,18 @@ def _build_prompt(persona: Persona, transcript: list[Any]) -> list[dict]:
     ]
 
 
-def _persona_information_state(persona: Persona, user_lines: list[str]) -> tuple[list[str], list[str]]:
-    persona_text = ". ".join(part for part in [persona.goal, persona.edge_case or ""] if part)
+def _persona_information_state(
+    persona: Persona,
+    user_lines: list[str],
+    *,
+    scenario_context: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str]]:
+    context_text = " ".join(
+        str(value) for value in (scenario_context or {}).values() if value not in (None, "")
+    )
+    persona_text = ". ".join(
+        part for part in [persona.goal, persona.edge_case or "", context_text] if part
+    )
     name = str(persona.name or "").strip()
     candidates = _extract_information_candidates(persona_text)
     if name and name.lower() not in {item.lower() for item in candidates}:
@@ -318,6 +358,205 @@ def _format_single_value_response(field_type: str, value: str) -> str:
     return f"It is {value}."
 
 
+def decide_next_user_action(
+    persona: Persona,
+    transcript: list[Any],
+    options: list[dict[str, Any]],
+    *,
+    scenario_context: dict[str, Any] | None = None,
+    behavior_constraints: list[str] | None = None,
+) -> dict[str, Any]:
+    """Choose a goal-relevant option or produce the next goal-directed message.
+
+    This is the single semantic decision point for interactive chatbot turns.
+    The configured persona goal remains authoritative; agent-provided options are
+    candidate workflow steps, never replacement objectives.
+    """
+    if not options:
+        generated = generate_next_user_turn(
+            persona,
+            transcript,
+            scenario_context=scenario_context,
+            behavior_constraints=behavior_constraints,
+        )
+        return {**generated, "selected_option_index": None}
+
+    messages = _build_prompt(
+        persona,
+        transcript,
+        scenario_context=scenario_context,
+        behavior_constraints=behavior_constraints,
+    )
+    messages[0]["content"] += """
+
+Interactive decision rules:
+- The configured persona goal is immutable and is the authoritative objective.
+- Treat agent-provided options only as possible next workflow steps.
+- Select an option only when it reasonably advances the goal in the current conversation state.
+- Select an option only when it is also compatible with scenario facts and behavior constraints.
+- Reject an option that requires an unsupported material assumption, even if it would advance the workflow.
+- An agent-provided choice may be selected when the scenario permits choosing it and it does not contradict configured facts or constraints.
+- A useful workflow step can be indirectly related to the goal; judge it from the latest agent response and full history, not word overlap.
+- Reject options that redirect the user to an unrelated objective, even when the agent recommends them.
+- If no option advances the goal, write the natural free-text reply that continues pursuing the configured goal.
+- Return JSON only. Do not include Markdown.
+"""
+    normalized_options = [
+        {
+            "index": index,
+            "label": str(option.get("label") or option.get("title") or option.get("text") or ""),
+            "message": str(option.get("message") or option.get("value") or option.get("payload") or option.get("text") or option.get("label") or ""),
+        }
+        for index, option in enumerate(options)
+    ]
+    messages[-1]["content"] += (
+        "\n\nAvailable agent options (JSON):\n"
+        + json.dumps(normalized_options, ensure_ascii=True)
+        + "\n\nReturn exactly one JSON object in this schema:\n"
+        + '{"action":"select_option","option_index":0}\n'
+        + "or:\n"
+        + '{"action":"free_text","option_index":null,"text":"goal-directed user reply"}'
+    )
+
+    start = time.perf_counter()
+    client = Groq(api_key=settings.groq_api_key)
+    response = client.chat.completions.create(
+        model=settings.groq_model,
+        messages=messages,
+        temperature=0.2,
+        max_completion_tokens=256,
+        reasoning_effort="low",
+        include_reasoning=False,
+        timeout=10.0,
+    )
+    choice = response.choices[0]
+    content = choice.message.content
+    raw = str(content or "")
+    logger.info(
+        "[STAGE: Simulated User Decision Output] content_state=%s content_length=%s "
+        "finish_reason=%s has_reasoning=%s",
+        _content_state(content),
+        len(raw),
+        getattr(choice, "finish_reason", None),
+        bool(getattr(choice.message, "reasoning", None)),
+    )
+    try:
+        decision = _parse_action_decision(raw)
+        result = _validated_action_result(decision, normalized_options)
+    except RuntimeError as exc:
+        logger.warning(
+            "Simulator interactive decision unusable (%s); using grounded free-text fallback",
+            str(exc),
+        )
+        return _grounded_decision_fallback(
+            persona,
+            transcript,
+            scenario_context=scenario_context,
+            behavior_constraints=behavior_constraints,
+            original_error=exc,
+        )
+
+    logger.info(
+        "[STAGE: Simulated User Decision] elapsed=%.3fs action=%s option_index=%s",
+        time.perf_counter() - start,
+        decision["action"],
+        result["selected_option_index"],
+    )
+    return result
+
+
+def _parse_action_decision(raw: str) -> dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        raise RuntimeError("Simulator returned an empty interactive decision.")
+    candidate = raw.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1).strip()
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Simulator returned malformed interactive decision JSON.") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("Simulator interactive decision must be a JSON object.")
+    action = str(value.get("action") or "").strip().lower()
+    if action == "select_option":
+        return {"action": action, "option_index": value.get("option_index")}
+    if action == "free_text":
+        text = value.get("text")
+        if text is None:
+            text = value.get("message")
+        return {"action": action, "option_index": None, "text": text}
+    raise RuntimeError("Simulator returned an unsupported interactive action.")
+
+
+def _validated_action_result(
+    decision: dict[str, Any],
+    normalized_options: list[dict[str, Any]],
+) -> dict[str, Any]:
+    action = decision["action"]
+    if action == "select_option":
+        selected_index = decision.get("option_index")
+        if not isinstance(selected_index, int) or isinstance(selected_index, bool):
+            raise RuntimeError("Simulator option decision is missing a valid integer option_index.")
+        if not 0 <= selected_index < len(normalized_options):
+            raise RuntimeError("Simulator option decision index is out of range.")
+        message = normalized_options[selected_index]["message"]
+        if not message:
+            raise RuntimeError("Simulator selected an interactive option without a dispatchable value.")
+        return {"message": message, "attachments": None, "selected_option_index": selected_index}
+
+    text = decision.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError("Simulator free-text decision is empty.")
+    return {"message": text.strip(), "attachments": None, "selected_option_index": None}
+
+
+def _grounded_decision_fallback(
+    persona: Persona,
+    transcript: list[Any],
+    *,
+    scenario_context: dict[str, Any] | None,
+    behavior_constraints: list[str] | None,
+    original_error: RuntimeError,
+) -> dict[str, Any]:
+    try:
+        generated = generate_next_user_turn(
+            persona,
+            transcript,
+            scenario_context=scenario_context,
+            behavior_constraints=behavior_constraints,
+        )
+    except RuntimeError as fallback_error:
+        raise RuntimeError(
+            "Interactive decision was unusable and grounded fallback generation "
+            "did not produce a valid user turn."
+        ) from fallback_error
+
+    message = generated.get("message")
+    if not isinstance(message, str) or not message.strip():
+        raise RuntimeError(
+            "Interactive decision was unusable and grounded fallback generation "
+            "did not produce a valid user turn."
+        ) from original_error
+    return {
+        "message": message.strip(),
+        "attachments": generated.get("attachments"),
+        "selected_option_index": None,
+    }
+
+
+def _content_state(content: Any) -> str:
+    if content is None:
+        return "none"
+    if not isinstance(content, str):
+        return "non_string"
+    if not content:
+        return "empty"
+    if not content.strip():
+        return "whitespace"
+    return "present"
+
+
 def _turn_role(turn: Any) -> str:
     role = getattr(turn, "role", None)
     if role:
@@ -337,17 +576,32 @@ def _turn_text(turn: Any) -> str:
     return str(getattr(turn, "content", getattr(turn, "text", "")) or "").strip()
 
 
-def generate_next_user_turn(persona: Persona, transcript: list[Any]) -> dict[str, Any]:
+def generate_next_user_turn(
+    persona: Persona,
+    transcript: list[Any],
+    *,
+    scenario_context: dict[str, Any] | None = None,
+    behavior_constraints: list[str] | None = None,
+) -> dict[str, Any]:
     start = time.perf_counter()
     turn_index = len(transcript) // 2
     try:
-        question_first = _question_first_response(persona, transcript)
+        # Scenario-grounded runs must pass through the single generation call so
+        # explicit facts and negative constraints can override convenience.
+        question_first = None
+        if not scenario_context and not behavior_constraints:
+            question_first = _question_first_response(persona, transcript)
         if question_first:
             elapsed = time.perf_counter() - start
             logger.info(f"[STAGE: Simulated User Generation] turn_index={turn_index} elapsed={elapsed:.3f}s source=question_first")
             return {"message": question_first, "attachments": None}
 
-        messages = _build_prompt(persona, transcript)
+        messages = _build_prompt(
+            persona,
+            transcript,
+            scenario_context=scenario_context,
+            behavior_constraints=behavior_constraints,
+        )
 
         client = Groq(api_key=settings.groq_api_key)
         response = client.chat.completions.create(

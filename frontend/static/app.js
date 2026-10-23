@@ -2263,17 +2263,12 @@ var App = window.App = {
     var sources = [];
     list.forEach(function(recording, index) {
       if (!recording || typeof recording !== "object") return null;
-      var metadata = recording.metadata || {};
-      var providerJson = metadata.provider_json || {};
       [
-        { label: App._callingRecordingLabel(recording, index, list.length), url: recording.remote_url || recording.url || recording.recording_url || recording.media_url || metadata.remote_url || metadata.recording_url || metadata.media_url || providerJson.recordingUrl || providerJson.recording_url || providerJson.stereoRecordingUrl },
-        { label: "Full Call", url: providerJson.fullCallRecordingUrl || providerJson.full_call_recording_url },
-        { label: "Assistant Audio", url: providerJson.assistantRecordingUrl || providerJson.assistant_recording_url || providerJson.agentRecordingUrl || providerJson.agent_recording_url },
-        { label: "Customer Audio", url: providerJson.customerRecordingUrl || providerJson.customer_recording_url || providerJson.userRecordingUrl || providerJson.user_recording_url || providerJson.callerRecordingUrl || providerJson.caller_recording_url }
+        { label: App._callingRecordingLabel(recording, index, list.length), url: recording.playback_url, downloadUrl: recording.download_url }
       ].forEach(function(source) {
         var url = safeMediaUrl(source.url);
         if (!url || sources.some(function(existing) { return existing.url === url; })) return;
-        sources.push({ label: source.label, url: url, duration: recording.duration_seconds });
+        sources.push({ label: source.label, url: url, downloadUrl: safeMediaUrl(source.downloadUrl) || url, duration: recording.duration_seconds });
       });
     });
     var playable = sources.map(function(source) {
@@ -2284,7 +2279,7 @@ var App = window.App = {
         '<audio controls preload="none" src="' + escAttr(source.url) + '"></audio>' +
         '<div class="calling-recording-actions">' +
           '<a href="' + escAttr(source.url) + '" target="_blank" rel="noopener">Play Recording</a>' +
-          '<a href="' + escAttr(source.url) + '" target="_blank" rel="noopener" download>Download Recording</a>' +
+          '<a href="' + escAttr(source.downloadUrl) + '" target="_blank" rel="noopener" download>Download Recording</a>' +
         '</div>' +
       '</div>';
     });
@@ -4200,11 +4195,13 @@ var App = window.App = {
     var pct = scoreAvailable ? (m.score * 100).toFixed(1) : "0";
     var failure = !notEvaluated && !metricError && !m.passed ? App._findFailureAnalysis(ev, m) : null;
     var action = "";
-    if (!notEvaluated && !metricError && !m.passed) {
-      if (failure) {
-        action = '<button class="failure-analysis-link" type="button" onclick="App.openFailureAnalysis(\'' + escAttr(m.name || "") + '\')">View Analysis →</button>';
-      } else {
-        action = '<button class="failure-analysis-link muted" type="button" onclick="App.openFailureAnalysis(\'' + escAttr(m.name || "") + '\')">View Analysis →</button>';
+    if (!m.passed) {
+      if (!notEvaluated && !metricError) {
+        if (failure) {
+          action = '<button class="failure-analysis-link" type="button" onclick="App.openFailureAnalysis(\'' + escAttr(m.name || "") + '\')">View Analysis →</button>';
+        } else {
+          action = '<button class="failure-analysis-link muted" type="button" onclick="App.openFailureAnalysis(\'' + escAttr(m.name || "") + '\')">View Analysis →</button>';
+        }
       }
     }
     return '<div class="metric-card ' + pf + '">' +

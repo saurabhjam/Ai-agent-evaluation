@@ -28,5 +28,21 @@ persona:
     summarizes the details correctly, confirm briefly.
     Do not repeat information unnecessarily.
 
+calling_simulator:
+  mode: normal
+  opening_message: "Hi, I'd like to schedule a routine dental appointment."
+  fields:
+    name:
+      aliases: ["name", "full name"]
+    phone_number:
+      aliases: ["phone", "phone number", "contact number"]
+      speak_as: digits
+    appointment_reason:
+      aliases: ["reason", "reason for the appointment", "reason for calling"]
+    preferred_date:
+      aliases: ["date", "day", "preferred date"]
+    preferred_time:
+      aliases: ["time", "preferred time"]
+
 max_turns: 12
 pass_threshold: 0.70

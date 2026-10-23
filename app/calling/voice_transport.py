@@ -66,6 +66,10 @@ class VoiceTransport:
 
     capabilities = VoiceTransportCapabilities()
 
+    def set_audio_recorder(self, recorder: Any) -> None:
+        """Attach an optional passive observer for normalized transport audio."""
+        self._audio_recorder = recorder
+
     def originate_call(
         self,
         *,
@@ -94,6 +98,10 @@ class VoiceTransport:
 
     def disconnect(self) -> None:
         """Optional hook to disconnect a media session."""
+
+    def last_utterance_complete(self) -> bool:
+        """Return whether the most recently received utterance was finalized."""
+        return True
 
 
 class UnconfiguredVoiceTransport(VoiceTransport):
@@ -255,6 +263,7 @@ class VapiVoiceTransport(VoiceTransport):
         self._sent_audio_chunks = 0
         self._received_audio_chunks = 0
         self._last_outgoing_audio_metadata: dict[str, Any] = {}
+        self._last_received_utterance_complete = False
         if provider is not None:
             self.provider = provider
         else:
@@ -354,6 +363,7 @@ class VapiVoiceTransport(VoiceTransport):
                     )
                     break
                 self.websocket.send(frame, opcode=_binary_opcode())
+                self._record_audio("local", frame)
                 time.sleep(self._frame_duration_seconds())
         except Exception as exc:
             logger.exception(
@@ -368,6 +378,7 @@ class VapiVoiceTransport(VoiceTransport):
             logger.error("Cannot receive Vapi audio: websocket not connected")
             raise VoiceTransportError("Vapi websocket is not connected.")
         logger.info("Waiting for Vapi audio timeout_seconds=%s", timeout_seconds)
+        self._last_received_utterance_complete = False
         deadline = time.monotonic() + timeout_seconds
         audio_chunks: list[bytes] = []
         utterance_started = False
@@ -409,6 +420,7 @@ class VapiVoiceTransport(VoiceTransport):
                 raise VoiceTransportError(f"Vapi websocket receive failed: {exc}") from exc
                 
             if isinstance(message, bytes):
+                self._record_audio("remote", message)
                 self._received_audio_chunks += 1
                 frame_rms = _frame_rms(message)
                 frame_duration = len(message) / bytes_per_second if bytes_per_second > 0 else 0.05
@@ -430,6 +442,7 @@ class VapiVoiceTransport(VoiceTransport):
                                 consecutive_silence_seconds,
                                 utterance_completed,
                             )
+                            self._last_received_utterance_complete = True
                             return self._incoming_audio(b"".join(audio_chunks))
                     else:
                         # Bounded leading silence (max ~0.5s) to avoid buffering dead air before speech
@@ -453,6 +466,7 @@ class VapiVoiceTransport(VoiceTransport):
                             sum(len(chunk) for chunk in audio_chunks),
                             utterance_started,
                         )
+                        self._last_received_utterance_complete = True
                         return self._incoming_audio(b"".join(audio_chunks))
 
         logger.error("Timed out waiting for Vapi websocket audio")
@@ -464,6 +478,9 @@ class VapiVoiceTransport(VoiceTransport):
             )
             return self._incoming_audio(b"".join(audio_chunks))
         raise TimeoutError("Timed out waiting for Vapi websocket audio.")
+
+    def last_utterance_complete(self) -> bool:
+        return self._last_received_utterance_complete
 
     def hang_up(self, session: VoiceTransportSession) -> None:
         if self.websocket is None:
@@ -512,11 +529,11 @@ class VapiVoiceTransport(VoiceTransport):
     def _is_assistant_utterance_completed(self, message: dict[str, Any]) -> bool:
         msg_type = message.get("type")
         role = message.get("role")
-        if msg_type == "speech-update" and role in ("assistant", "bot", None) and message.get("status") == "stopped":
-            return True
-        if msg_type == "transcript" and role in ("assistant", "bot", None) and message.get("transcriptType") == "final":
-            return True
-        return False
+        return (
+            msg_type == "speech-update"
+            and role in ("assistant", "bot", None)
+            and message.get("status") == "stopped"
+        )
 
     def _timeout_seconds(self) -> float:
         value = self.config.settings.get("websocket_timeout_seconds") or self.config.settings.get("timeout_seconds") or 30
@@ -567,6 +584,22 @@ class VapiVoiceTransport(VoiceTransport):
             "output_bytes": len(outgoing),
             "first_32_bytes_hex": outgoing[:32].hex(),
         }
+
+    def _record_audio(self, direction: str, pcm: bytes) -> None:
+        recorder = getattr(self, "_audio_recorder", None)
+        if recorder is None:
+            return
+        try:
+            callback = recorder.on_remote_audio if direction == "remote" else recorder.on_local_audio
+            callback(
+                pcm,
+                sample_rate=self._sample_rate(),
+                channels=1,
+                sample_width=2,
+                timestamp=time.monotonic(),
+            )
+        except Exception:
+            logger.exception("EvalForge audio recording failed direction=%s", direction)
 
 
 def _default_websocket_factory():

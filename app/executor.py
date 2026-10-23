@@ -23,7 +23,7 @@ from app.config import settings
 from app.interactive.orchestrator import ConversationOrchestrator
 from app.interaction_dispatcher import dispatch_interaction
 from app.schemas import TestScenario
-from app.simulator import generate_next_user_turn
+from app.simulator import decide_next_user_action, generate_next_user_turn
 from app.session import BrowserSession, EvaluationSession
 from app.voice.persona import VoicePersonaEngine
 from app.voice.converter import voice_to_normalized_conversation
@@ -81,33 +81,18 @@ def _selectable_component_message(component: dict[str, Any]) -> str | None:
     ) or None
 
 
-def _tokenize_for_option_selection(text: str) -> set[str]:
-    import re
-
-    stop_words = {
-        "a", "an", "and", "are", "as", "at", "be", "for", "from", "how",
-        "i", "in", "is", "it", "me", "my", "of", "on", "or", "please",
-        "the", "this", "to", "what", "which", "with", "you", "your",
-    }
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
-        if len(token) > 2 and token not in stop_words
-    }
-
-
-def _choose_interactive_option(scenario: TestScenario, transcript: list[Any]) -> str | None:
+def _interactive_options(transcript: list[Any]) -> list[tuple[dict[str, Any], str]]:
     latest_agent = _latest_agent_message(transcript)
     if latest_agent is None:
-        return None
+        return []
 
     metadata = _message_attr(latest_agent, "metadata") or {}
     if not isinstance(metadata, dict):
-        return None
+        return []
 
     raw_components = metadata.get("components") or metadata.get("rich_components") or []
     if not isinstance(raw_components, list):
-        return None
+        return []
 
     options: list[tuple[dict[str, Any], str]] = []
     for component in raw_components:
@@ -117,43 +102,7 @@ def _choose_interactive_option(scenario: TestScenario, transcript: list[Any]) ->
         if message:
             options.append((component, message))
 
-    if not options:
-        return None
-
-    goal_text = " ".join(
-        part
-        for part in [
-            scenario.persona.goal,
-            scenario.persona.tone,
-            scenario.persona.edge_case or "",
-            _message_attr(latest_agent, "content", "") or "",
-        ]
-        if part
-    )
-    goal_tokens = _tokenize_for_option_selection(goal_text)
-
-    best_message = options[0][1]
-    best_score = -1
-    for component, message in options:
-        option_text = " ".join(
-            str(value)
-            for value in [
-                component.get("label"),
-                component.get("message"),
-                component.get("value"),
-                component.get("text"),
-                component.get("title"),
-                component.get("id"),
-            ]
-            if value not in (None, "")
-        )
-        option_tokens = _tokenize_for_option_selection(option_text)
-        score = len(goal_tokens & option_tokens)
-        if score > best_score:
-            best_score = score
-            best_message = message
-
-    return best_message
+    return options
 
 
 class ExecutionResult(BaseModel):
@@ -392,20 +341,43 @@ class ScenarioExecutor:
                 for _ in range(scenario.max_turns):
                     transcript = adapter.get_transcript()
 
-                    if dispatch_interaction(adapter=adapter, scenario=scenario, transcript=transcript):
+                    if dispatch_interaction(
+                        adapter=adapter,
+                        scenario=scenario,
+                        transcript=transcript,
+                        allow_selectable=False,
+                    ):
                         continue
 
-                    interactive_message = _choose_interactive_option(
-                        scenario,
-                        transcript,
-                    )
-                    if interactive_message:
-                        user_message = interactive_message
-                        user_attachments = None
+                    interactive_options = _interactive_options(transcript)
+                    if interactive_options:
+                        decision = decide_next_user_action(
+                            scenario.persona,
+                            transcript,
+                            [component for component, _ in interactive_options],
+                            scenario_context=scenario.context,
+                            behavior_constraints=scenario.behavior,
+                        )
+                        selected_index = decision.get("selected_option_index")
+                        if isinstance(selected_index, int) and not isinstance(selected_index, bool) and 0 <= selected_index < len(interactive_options):
+                            selected_component, selected_message = interactive_options[selected_index]
+                            if dispatch_interaction(
+                                adapter=adapter,
+                                scenario=scenario,
+                                transcript=transcript,
+                                selected_component=selected_component,
+                            ):
+                                continue
+                            user_message = selected_message
+                        else:
+                            user_message = decision["message"]
+                        user_attachments = decision.get("attachments")
                     else:
                         user_turn = generate_next_user_turn(
                             scenario.persona,
                             transcript,
+                            scenario_context=scenario.context,
+                            behavior_constraints=scenario.behavior,
                         )
 
                         user_message = user_turn["message"]

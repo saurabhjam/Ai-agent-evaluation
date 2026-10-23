@@ -66,6 +66,7 @@ connection_dump.json
 # =========================
 scratch/
 *.bak
+tmp_*
 .deepeval_telemtry.txt
 
 # =========================

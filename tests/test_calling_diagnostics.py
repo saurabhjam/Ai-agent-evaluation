@@ -90,8 +90,9 @@ def test_sink_failure_and_exception_messages_do_not_escape(capture, monkeypatch)
 
 
 def _conversation():
-    transport = Mock(spec=["connect", "receive_audio", "send_audio", "hang_up", "control_messages"])
+    transport = Mock(spec=["connect", "receive_audio", "send_audio", "hang_up", "control_messages", "last_utterance_complete"])
     transport.control_messages = []
+    transport.last_utterance_complete.return_value = True
 
     def receive(**kwargs):
         transport.control_messages.append({"type": "speech-update", "status": "stopped", "role": "assistant"})
@@ -105,7 +106,7 @@ def _conversation():
     persona = CallingPersona(name="Rahul Sharma", goal="Arrange an appointment. Answer only requested details.",
                              tone="polite", edge_case="Do not volunteer unrelated details.", phone_number="9876543210")
     response = Mock()
-    response.choices = [Mock(message=Mock(content=" 9876543210. "))]
+    response.choices = [Mock(message=Mock(content=" {{fact:phone_number}}. "))]
     session = VoiceTransportSession(transport_name="test", transport_call_id="provider_call_test",
                                    direction=CallDirection.inbound, status=CallStatus.in_progress)
     return transport, stt, tts, persona, response, session
@@ -139,8 +140,8 @@ def test_boundaries_correlation_timing_and_provider_copy(capture, monkeypatch):
             )
             assert transcript.turns[-1].text == "9876543210."
             request = groq.return_value.chat.completions.create.call_args.kwargs["messages"]
-            assert request[-1]["content"] == stt.transcribe.return_value
-            assert "9876543210" in request[0]["content"]
+            assert f"Latest complete agent utterance: {stt.transcribe.return_value}" in request[0]["content"]
+            assert "9876543210" not in request[0]["content"]
         _fetch_provider_transcript(provider, Mock())
         return _persist_calling_response(
             response=CallingRunResponse(success=True, status="completed", connection_id="test", provider="test", created_at="now"),
@@ -161,7 +162,7 @@ def test_boundaries_correlation_timing_and_provider_copy(capture, monkeypatch):
     assert all(e["duration_ms"] >= 0 for e in events if e["stage"].endswith(".end"))
     tts.synthesize.assert_called_once_with("9876543210.")
     by_stage = {e["stage"]: e for e in events}
-    assert by_stage["groq.response"]["data"]["text"]["fingerprint"] == d.fingerprint(" 9876543210. ")
+    assert by_stage["groq.response"]["data"]["text"]["fingerprint"] == d.fingerprint("{{fact:phone_number}}.")
     assert by_stage["tts.start"]["data"]["text"]["fingerprint"] == d.fingerprint("9876543210.")
     assert by_stage["provider.transcript"]["exact_text_match"] is True
     assert by_stage["provider.transcript"]["correlation"] == "ordinal_candidate"
@@ -236,7 +237,7 @@ def test_disabled_diagnostics_does_not_inspect_control_buffer(capture, monkeypat
     assert d.control_snapshot(NoInspection()) is None
 
 
-def test_encrypted_request_preserves_actual_persona_and_instructions_but_not_credentials(capture, monkeypatch):
+def test_encrypted_request_contains_only_content_actually_passed_to_groq(capture, monkeypatch):
     from app.calling.simulator import generate_next_user_turn
 
     key = Fernet.generate_key()
@@ -248,15 +249,18 @@ def test_encrypted_request_preserves_actual_persona_and_instructions_but_not_cre
     try:
         with patch("app.calling.simulator.Groq") as groq:
             groq.return_value.chat.completions.create.return_value = response
-            generate_next_user_turn(persona, [])
+            generate_next_user_turn(
+                persona,
+                [CallTranscriptTurn(speaker=TranscriptSpeaker.agent, text="What is your phone number?", turn_index=0)],
+            )
     finally:
         d._trace.reset(token)
     request = next(event for _, event in capture if event["stage"] == "groq.request")
     private = json.loads(Fernet(key).decrypt(request["encrypted_data"].encode()))
-    assert private["persona"]["phone_number"] == "9876543210"
-    assert private["persona"]["goal"] == persona.goal
-    assert private["persona"]["edge_case"] == persona.edge_case
-    assert "Answer the latest agent question" in private["messages"][0]["content"]
+    assert private["action"] == "facts"
+    assert private["allowed_fields"] == ["phone_number"]
+    assert private["latest_agent"] == "What is your phone number?"
+    assert "9876543210" not in json.dumps(private)
     assert "credential-never-capture" not in json.dumps(private)
     assert "credential-never-capture" not in json.dumps(capture)
 

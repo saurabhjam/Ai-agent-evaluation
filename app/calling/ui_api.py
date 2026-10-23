@@ -17,7 +17,9 @@ from app.calling.evaluation_bridge import CallingEvaluationBridge
 from app.calling.evaluation_runner import CallingEvaluationRuntimeRunner
 from app.calling.execution_result import CallingExecutionResult, CallingExecutionStatus
 from app.calling.models import CallDirection
+from app.calling.recording_artifacts import persist_recordings
 from app.evaluation_service import EvaluationResult
+from app.models.failure_analysis import FailureAnalysis
 from app.evaluation_store import new_evaluation_id, save_evaluation_report
 from app.schemas import TestScenario
 from app.calling import diagnostics
@@ -101,6 +103,7 @@ class CallingRunResponse(BaseModel):
     connection_id: str
     provider: str
     evaluation: Optional[EvaluationResult] = None
+    failure_analysis: list[FailureAnalysis] = Field(default_factory=list)
     execution: Optional[CallingExecutionResult] = None
     transcript: list[dict[str, Any]] = Field(default_factory=list)
     recording_metadata: list[dict[str, Any]] = Field(default_factory=list)
@@ -396,13 +399,37 @@ def _persist_calling_response(
     response: CallingRunResponse,
     scenario: TestScenario | None,
 ) -> CallingRunResponse:
+    evaluation_id = response.evaluation_id or diagnostics.evaluation_id() or new_evaluation_id()
+    recordings = response.recording_metadata
+    recording_status = response.recording_status
+    conversation_audio = response.conversation_audio
+    if recordings:
+        recordings, recording_status, conversation_audio = persist_recordings(recordings, evaluation_id)
+    safe_execution = response.execution
+    if safe_execution is not None:
+        safe_execution = CallingExecutionResult.model_validate(
+            _without_provider_recording_urls(safe_execution.model_dump(mode="json"))
+        )
+    report = {
+        **response.report,
+        "recording_status": recording_status,
+        "conversation_audio": conversation_audio,
+    }
+    response = response.model_copy(update={
+        "evaluation_id": evaluation_id,
+        "recording_metadata": recordings,
+        "recording_status": recording_status,
+        "conversation_audio": conversation_audio,
+        "report": report,
+        "execution": safe_execution,
+    })
     payload = response.model_dump(mode="json")
     execution = response.execution
     evaluation = response.evaluation
     session = execution.call_session if execution else None
     payload.update(
         {
-            "evaluation_id": response.evaluation_id or diagnostics.evaluation_id() or new_evaluation_id(),
+            "evaluation_id": evaluation_id,
             "agent_id": response.connection_id,
             "agent_type": "calling",
             "adapter": response.provider,
@@ -416,12 +443,29 @@ def _persist_calling_response(
             "passed": evaluation.passed if evaluation else False,
             "conversation": [turn.model_dump(mode="json") for turn in evaluation.conversation] if evaluation else [],
             "metrics": [metric.model_dump(mode="json") for metric in evaluation.metrics] if evaluation else [],
+            "failure_analysis": [
+                item.model_dump(mode="json") for item in (evaluation.failure_analysis or [])
+            ] if evaluation else [],
             "rag_evaluation": evaluation.rag_evaluation.model_dump(mode="json") if evaluation and evaluation.rag_evaluation else None,
             "complete_report": payload.get("report") or {},
         }
     )
     saved = save_evaluation_report(payload)
     return response.model_copy(update={"evaluation_id": saved["evaluation_id"]})
+
+
+def _without_provider_recording_urls(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_without_provider_recording_urls(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    cleaned: dict[str, Any] = {}
+    for key, item in value.items():
+        normalized = str(key).replace("_", "").lower()
+        if normalized == "remoteurl" or ("record" in normalized and "url" in normalized):
+            continue
+        cleaned[key] = _without_provider_recording_urls(item)
+    return cleaned
 
 
 @router.get("/providers")
@@ -593,6 +637,7 @@ def run_calling_evaluation(connection_id: str, payload: CallingRunRequest) -> Ca
             connection_id=connection_id,
             provider=raw["provider"],
             evaluation=evaluation,
+            failure_analysis=evaluation.failure_analysis or [],
             execution=execution,
             transcript=transcript,
             recording_metadata=recordings,

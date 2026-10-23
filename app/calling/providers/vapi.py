@@ -7,6 +7,7 @@ import requests
 import os
 import logging
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 from app.calling.config import CallingProviderConfig
@@ -205,7 +206,6 @@ class VapiProvider(CallProviderAdapter):
             timeout_seconds
             if timeout_seconds is not None
             else self.config.settings.get("completion_timeout_seconds")
-            or self.config.settings.get("artifact_timeout_seconds")
             or 60
         )
         interval = float(
@@ -229,9 +229,7 @@ class VapiProvider(CallProviderAdapter):
                 bool(_transcript_turns_from_vapi_call(body)),
                 _has_vapi_recording(body),
             )
-            if self.is_session_terminal(status) and status != CallStatus.completed:
-                return current
-            if status == CallStatus.completed and self._artifacts_ready(body):
+            if self.is_session_terminal(status):
                 return current
             time.sleep(max(interval, 0.1))
         if last_body:
@@ -239,18 +237,43 @@ class VapiProvider(CallProviderAdapter):
             return self._session_from_body(current, last_body, status=CallStatus.timed_out if not self.is_session_terminal(status) else status)
         return current.model_copy(update={"status": CallStatus.timed_out})
 
+    def wait_for_artifacts(
+        self,
+        session: CallSession,
+        *,
+        timeout_seconds: Optional[float] = None,
+        poll_interval_seconds: Optional[float] = None,
+    ) -> CallSession:
+        timeout = float(
+            timeout_seconds
+            if timeout_seconds is not None
+            else self.config.settings.get("artifact_timeout_seconds") or 30
+        )
+        interval = float(
+            poll_interval_seconds
+            if poll_interval_seconds is not None
+            else self.config.settings.get("artifact_poll_interval_seconds") or 1
+        )
+        deadline = time.monotonic() + timeout
+        current = session
+        while time.monotonic() < deadline:
+            body = self._fetch_call(current, allow_initial=False, use_cache=False)
+            status = self._status_from_body(body, fallback=current.status)
+            current = self._session_from_body(current, body, status=status)
+            if status != CallStatus.completed:
+                return current
+            if bool(_transcript_turns_from_vapi_call(body)) and _vapi_recording_ready(body):
+                return _with_artifact_readiness(current, "ready")
+            time.sleep(max(interval, 0.1))
+        return _with_artifact_readiness(current, "timed_out")
+
     def end_call(self, session: CallSession) -> CallSession:
         return session.model_copy(update={"status": CallStatus.completed})
 
     def fetch_recording(self, session: CallSession) -> Optional[CallRecording]:
         logger.info("Fetching Vapi recording metadata for call_id=%s", session.provider_call_id)
         body = self._fetch_call(session)
-        url = (
-            body.get("recordingUrl")
-            or body.get("recording_url")
-            or body.get("stereoRecordingUrl")
-            or body.get("artifact", {}).get("recordingUrl")
-        )
+        url = _full_call_recording_url(body)
         if not url:
             logger.info("No Vapi recording URL found for call_id=%s", session.provider_call_id)
             return None
@@ -263,11 +286,13 @@ class VapiProvider(CallProviderAdapter):
             recording_id=recording_id,
             provider_recording_id=recording_id,
             remote_url=str(url),
-            duration_seconds=_to_float(body.get("durationSeconds") or body.get("duration") or body.get("endedAtDuration")),
+            duration_seconds=_recording_duration(body),
+            content_type="audio/wav",
             format="wav",
             metadata={
                 "call_id": session.provider_call_id,
                 "provider_json": _safe_provider_json(body),
+                "alternate_remote_urls": _full_call_recording_urls(body)[1:],
             },
         )
 
@@ -380,10 +405,6 @@ class VapiProvider(CallProviderAdapter):
             }
         )
 
-    def _artifacts_ready(self, body: dict[str, Any]) -> bool:
-        return bool(_transcript_turns_from_vapi_call(body)) and _has_vapi_recording(body)
-
-
 def _has_vapi_evidence(data: dict[str, Any]) -> bool:
     return any(
         key in data
@@ -400,13 +421,67 @@ def _has_vapi_evidence(data: dict[str, Any]) -> bool:
 
 
 def _has_vapi_recording(data: dict[str, Any]) -> bool:
-    artifact = data.get("artifact")
-    return bool(
-        data.get("recordingUrl")
-        or data.get("recording_url")
-        or data.get("stereoRecordingUrl")
-        or (artifact.get("recordingUrl") if isinstance(artifact, dict) else None)
+    return bool(_full_call_recording_url(data))
+
+
+def _full_call_recording_url(data: dict[str, Any]) -> Optional[str]:
+    """Resolve Vapi's combined full-call recording inside the provider adapter."""
+    urls = _full_call_recording_urls(data)
+    return urls[0] if urls else None
+
+
+def _full_call_recording_urls(data: dict[str, Any]) -> list[str]:
+    artifact = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
+    recording = artifact.get("recording") if isinstance(artifact.get("recording"), dict) else {}
+    mono = recording.get("mono") if isinstance(recording.get("mono"), dict) else {}
+    candidates = (
+        mono.get("combinedUrl"),
+        mono.get("combined_url"),
+        artifact.get("recordingUrl"),
+        data.get("recordingUrl"),
+        data.get("recording_url"),
+        recording.get("stereoUrl"),
+        data.get("stereoRecordingUrl"),
     )
+    return list(dict.fromkeys(str(value) for value in candidates if value))
+
+
+def _vapi_recording_ready(data: dict[str, Any]) -> bool:
+    for url in _full_call_recording_urls(data):
+        try:
+            response = requests.get(url, headers={"Range": "bytes=0-0"}, stream=True, timeout=(5, 10))
+            try:
+                content_type = str(response.headers.get("content-type") or "").lower()
+                if response.status_code in {200, 206} and not any(
+                    value in content_type for value in ("application/json", "text/html", "text/plain")
+                ) and any(response.iter_content(chunk_size=1)):
+                    return True
+            finally:
+                response.close()
+        except requests.RequestException:
+            continue
+    return False
+
+
+def _with_artifact_readiness(session: CallSession, state: str) -> CallSession:
+    metadata = {**(session.provider_metadata or {}), "artifact_readiness": state}
+    return session.model_copy(update={"provider_metadata": metadata})
+
+
+def _recording_duration(data: dict[str, Any]) -> Optional[float]:
+    direct = _to_float(data.get("durationSeconds") or data.get("duration") or data.get("endedAtDuration"))
+    if direct is not None:
+        return direct
+    started = data.get("startedAt")
+    ended = data.get("endedAt")
+    if not started or not ended:
+        return None
+    try:
+        start = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
+        return max((end - start).total_seconds(), 0.0)
+    except (TypeError, ValueError):
+        return None
 
 
 def _transcript_turns_from_vapi_call(data: dict[str, Any]) -> list[CallTranscriptTurn]:
