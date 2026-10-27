@@ -69,6 +69,8 @@ def list_management_evaluations(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     service: ManagementAggregationService = Depends(get_management_service),
 ) -> PaginatedEvaluations:
     if date_from and date_to and date_from > date_to:
@@ -82,6 +84,7 @@ def list_management_evaluations(
             status=status,
             date_from=date_from,
             date_to=date_to,
+            workflow_id=workflow_id, test_case_type=test_case_type,
         )
     except (AgentNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="Agent not found") from exc
@@ -98,6 +101,24 @@ def list_management_scenarios(
         raise HTTPException(status_code=404, detail="Agent not found") from exc
 
 
+@router.get("/agents/{agent_key}/workflows")
+def list_management_workflows(
+    agent_key: str, scenario_id: str | None = None,
+    status: Literal["pass", "fail", "error", "unknown"] | None = None,
+    date_from: datetime | None = None, date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
+    service: ManagementAggregationService = Depends(get_management_service),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must be before date_to")
+    try:
+        reports = service.select_reports(agent_key, scenario_id=scenario_id, status=status, date_from=date_from, date_to=date_to, workflow_id=workflow_id, test_case_type=test_case_type)
+        return service.workflow_data(agent_key, reports, workflow_id=workflow_id)
+    except (AgentNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Agent not found") from exc
+
+
 def _build_consolidated(
     agent_key: str,
     scenario_id: str | None,
@@ -105,12 +126,15 @@ def _build_consolidated(
     date_from: datetime | None,
     date_to: datetime | None,
     engine: ConsolidatedReportEngine,
+    workflow_id: str | None = None,
+    test_case_type: str | None = None,
 ) -> ConsolidatedReport:
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=422, detail="date_from must be before date_to")
     try:
         return engine.build(
-            agent_key, scenario_id=scenario_id, status=status, date_from=date_from, date_to=date_to
+            agent_key, scenario_id=scenario_id, status=status, date_from=date_from, date_to=date_to,
+            workflow_id=workflow_id, test_case_type=test_case_type,
         )
     except (AgentNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="Agent not found") from exc
@@ -123,9 +147,11 @@ def get_consolidated_report(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
 ) -> ConsolidatedReport:
-    return _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    return _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine, workflow_id, test_case_type)
 
 
 @router.get("/agents/{agent_key}/consolidated-report/html", response_class=HTMLResponse)
@@ -135,9 +161,11 @@ def download_consolidated_html(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
 ) -> HTMLResponse:
-    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine, workflow_id, test_case_type)
     return HTMLResponse(render_consolidated_html(report), headers={"Content-Disposition": "attachment; filename=evalforge-consolidated-report.html"})
 
 
@@ -148,9 +176,11 @@ def download_consolidated_pdf(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
 ) -> Response:
-    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine, workflow_id, test_case_type)
     return Response(render_consolidated_pdf(report), media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=evalforge-consolidated-report.pdf"})
 
 
@@ -161,9 +191,11 @@ def download_consolidated_docx(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
 ) -> Response:
-    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine, workflow_id, test_case_type)
     return Response(render_consolidated_docx(report), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": "attachment; filename=evalforge-consolidated-report.docx"})
 
 
@@ -174,9 +206,11 @@ def download_consolidated_csv(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
 ) -> Response:
-    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine, workflow_id, test_case_type)
     return Response(render_consolidated_csv(report), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=evalforge-consolidated-report.csv"})
 
 
@@ -187,9 +221,11 @@ def download_consolidated_package(
     status: Literal["pass", "fail", "error", "unknown"] | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    workflow_id: str | None = None,
+    test_case_type: Literal["positive", "negative", "edge"] | None = None,
     engine: ConsolidatedReportEngine = Depends(get_consolidated_report_engine),
 ) -> Response:
-    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine)
+    report = _build_consolidated(agent_key, scenario_id, status, date_from, date_to, engine, workflow_id, test_case_type)
     try:
         package = build_consolidated_report_package(report)
     except ConsolidatedPackageError as exc:

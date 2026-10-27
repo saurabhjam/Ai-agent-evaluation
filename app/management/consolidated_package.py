@@ -91,6 +91,13 @@ def _with_bundled_references(
     for item in package_report.critical_failures:
         if item.evaluation_id in paths:
             item.report_url = paths[item.evaluation_id]
+    for scenario in package_report.scenario_failures:
+        for item in scenario.evaluations:
+            item.report_url = paths[item.evaluation_id]
+    for workflow in package_report.workflows:
+        for case in workflow["cases"]:
+            if case["evaluation_id"] in paths:
+                case["report_url"] = paths[case["evaluation_id"]]
     return package_report
 
 

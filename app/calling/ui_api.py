@@ -22,6 +22,8 @@ from app.evaluation_service import EvaluationResult
 from app.models.failure_analysis import FailureAnalysis
 from app.evaluation_store import new_evaluation_id, save_evaluation_report
 from app.schemas import TestScenario
+from app.scenario_metadata import snapshot_scenario
+from app.workflow_models import ScenarioMetadata
 from app.calling import diagnostics
 
 
@@ -98,6 +100,7 @@ class CallingRunRequest(BaseModel):
 
 class CallingRunResponse(BaseModel):
     evaluation_id: Optional[str] = None
+    scenario_metadata: Optional[ScenarioMetadata] = None
     success: bool
     status: CallingRunStatus
     connection_id: str
@@ -398,6 +401,7 @@ def _persist_calling_response(
     *,
     response: CallingRunResponse,
     scenario: TestScenario | None,
+    scenario_metadata: ScenarioMetadata | None = None,
 ) -> CallingRunResponse:
     evaluation_id = response.evaluation_id or diagnostics.evaluation_id() or new_evaluation_id()
     recordings = response.recording_metadata
@@ -416,6 +420,7 @@ def _persist_calling_response(
         "conversation_audio": conversation_audio,
     }
     response = response.model_copy(update={
+        "scenario_metadata": scenario_metadata or response.scenario_metadata,
         "evaluation_id": evaluation_id,
         "recording_metadata": recordings,
         "recording_status": recording_status,
@@ -583,6 +588,10 @@ def run_calling_evaluation(connection_id: str, payload: CallingRunRequest) -> Ca
         )
 
     scenario = _load_scenario(payload.scenario_path)
+    try:
+        scenario_metadata = snapshot_scenario(scenario, source_path=_ROOT / payload.scenario_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     provider_config = _provider_config(raw)
 
     config = raw.get("config") or {}
@@ -614,7 +623,7 @@ def run_calling_evaluation(connection_id: str, payload: CallingRunRequest) -> Ca
                 error=execution.error or "Calling execution failed before evaluation.",
                 created_at=_now(),
             )
-            return _persist_calling_response(response=response, scenario=scenario)
+            return _persist_calling_response(response=response, scenario=scenario, scenario_metadata=scenario_metadata)
         evaluation = CallingEvaluationBridge().evaluate(execution, scenario)
         transcript = _transcript(execution)
         recordings = _recording_metadata(execution)
@@ -649,7 +658,7 @@ def run_calling_evaluation(connection_id: str, payload: CallingRunRequest) -> Ca
             error=evaluation.error,
             created_at=_now(),
         )
-        return _persist_calling_response(response=response, scenario=scenario)
+        return _persist_calling_response(response=response, scenario=scenario, scenario_metadata=scenario_metadata)
     except Exception as exc:
         return CallingRunResponse(
             success=False,

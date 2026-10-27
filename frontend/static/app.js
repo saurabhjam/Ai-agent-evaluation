@@ -618,11 +618,15 @@ var App = window.App = {
         App._agentSummaryCard("Unknown Outcomes", Number(outcomes.unknown) || 0, "neutral") +
         App._agentSummaryCard("Overall Average Score", score, "blue") +
       '</div>' +
+      '<section class="management-detail-section"><h2>Workflow Coverage and Test Cases</h2>' + App._workflowReport(agent.workflows || [], agent.catalog_issues || [], "all") + '</section>' +
       '<section class="management-detail-section"><div class="management-detail-section-head"><div><h2>Scenario Summary</h2><p>Latest valid result for each unique scenario.</p></div></div><div id="management-scenarios-content" class="table-wrapper"></div></section>' +
       '<section class="management-detail-section"><div class="management-detail-section-head"><div><h2>Evaluation History</h2><p>Every qualifying post-baseline run for this agent.</p></div></div>' +
         App._managementHistoryFilters() +
         '<div id="management-history-content" class="table-wrapper"></div><div id="management-history-pagination" class="management-pagination"></div>' +
       '</section></div>';
+    container.querySelectorAll(".consolidated-individual-report").forEach(function(button) {
+      button.addEventListener("click", function(){ App.openManagementEvaluationReport(button.dataset.evaluationId); });
+    });
   },
 
   _agentSummaryCard(label, value, tone) {
@@ -853,7 +857,7 @@ var App = window.App = {
     State.managementAgentDetail = agent;
     content.innerHTML = '<div class="management-detail-loading"><div class="spinner lg"></div><span>Building consolidated report from persisted evaluations...</span></div>';
     var filters = State.consolidatedReportFilters || {};
-    var params = { scenario_id: filters.scenario_id, status: filters.status };
+    var params = { scenario_id: filters.scenario_id, status: filters.status, workflow_id: filters.workflow_id, test_case_type: filters.test_case_type };
     if (filters.date_from) params.date_from = filters.date_from + "T00:00:00Z";
     if (filters.date_to) params.date_to = filters.date_to + "T23:59:59.999Z";
     try {
@@ -873,11 +877,11 @@ var App = window.App = {
     var sections = Array.isArray(report.section_order) ? report.section_order : [];
     var html = '<div class="consolidated-report-shell">' + App._consolidatedToolbar(report) +
       '<header class="consolidated-report-cover"><div class="consolidated-eyebrow">EvalForge Management</div><h1>Consolidated Evaluation Report</h1><p>' + escHtml(report.agent_name || "Unnamed agent") + '</p><div class="consolidated-cover-meta"><span>' + escHtml(report.agent_type || "N/A") + '</span><span>' + escHtml(report.provider || report.adapter || "N/A") + '</span><span>Generated ' + escHtml(fmtDate(report.generated_at)) + '</span></div></header>';
-    html += App._consolidatedSection(sections[0], App._consolidatedExecutive(executive));
-    html += App._consolidatedSection(sections[1], App._consolidatedCoverage(coverage));
+    html += App._consolidatedSection(sections[0], App._consolidatedExecutive(executive) + App._consolidatedOutcomeChart(report.outcome_distribution));
+    html += App._consolidatedSection(sections[1], App._workflowReport(report.workflows || [], report.catalog_issues || [], "coverage") + App._consolidatedCoverage(coverage));
     html += App._consolidatedSection(sections[2], App._consolidatedMetrics(report.consolidated_metrics || []));
-    html += App._consolidatedSection(sections[3], App._consolidatedScenarios(report.scenario_results || []));
-    html += App._consolidatedSection(sections[4], App._consolidatedIssues(report.critical_failures || []));
+    html += App._consolidatedSection(sections[3], App._workflowReport(report.workflows || [], [], "cases") + App._consolidatedScenarios(report.scenario_results || []));
+    html += App._consolidatedSection(sections[4], App._consolidatedScenarioFailures(report.scenario_failures || []) + App._consolidatedIssues((report.critical_failures || []).filter(function(i){return i.technical;})));
     html += App._consolidatedSection(sections[5], App._consolidatedRecommendations(report.recommendations || []));
     html += App._consolidatedSection(sections[6], App._consolidatedHistory(report.historical_comparison || {}));
     html += App._consolidatedSection(sections[7], App._consolidatedReferences(report.individual_reports || []));
@@ -891,17 +895,20 @@ var App = window.App = {
     var filters = State.consolidatedReportFilters || {};
     var scenarios = State.managementScenarios || [];
     var scenarioOptions = scenarios.map(function(item) { return '<option value="' + escAttr(item.scenario_id) + '" ' + (filters.scenario_id === item.scenario_id ? 'selected' : '') + '>' + escHtml(item.scenario_id) + '</option>'; }).join("");
+    var workflowOptions = ((State.managementAgentDetail || {}).workflows || report.workflows || []).filter(function(w){return w.workflow_id;}).map(function(w){return '<option value="'+escAttr(w.workflow_id)+'" '+(filters.workflow_id===w.workflow_id?'selected':'')+'>'+escHtml(w.workflow_name)+'</option>';}).join('');
     var base = "/management/agents/" + encodeURIComponent(report.agent_key) + "/consolidated-report/";
     var query = new URLSearchParams();
     Object.keys(filters).forEach(function(key) { if (filters[key]) query.set(key, key.indexOf("date_") === 0 ? filters[key] + (key === "date_from" ? "T00:00:00Z" : "T23:59:59.999Z") : filters[key]); });
     var suffix = query.toString() ? "?" + query.toString() : "";
     return '<div class="consolidated-toolbar"><button class="btn btn-ghost btn-sm" onclick="App.navigate(\'agent-details\', State.managementAgentDetail)">' + Icon.back + ' Back to Agent Details</button><div class="consolidated-downloads">' +
       App._reportDownloadLink(Config.apiBase + base + "package" + suffix, "Download Report Package") + App._reportDownloadLink(Config.apiBase + base + "pdf" + suffix, "Download PDF") + App._reportDownloadLink(Config.apiBase + base + "html" + suffix, "Download HTML") + App._reportDownloadLink(Config.apiBase + base + "docx" + suffix, "Download DOCX") + App._reportDownloadLink(Config.apiBase + base + "csv" + suffix, "Download CSV") + '</div></div>' +
-      '<div class="consolidated-filters"><div><label class="form-label">Scenario</label><select class="form-input" id="consolidated-scenario"><option value="">All scenarios</option>' + scenarioOptions + '</select></div><div><label class="form-label">Outcome</label><select class="form-input" id="consolidated-status"><option value="">All outcomes</option>' + ["pass","fail","error","unknown"].map(function(value) { return '<option value="'+value+'" '+(filters.status===value?'selected':'')+'>'+value.toUpperCase()+'</option>'; }).join("") + '</select></div><div><label class="form-label">From</label><input class="form-input" id="consolidated-from" type="date" value="' + escAttr(filters.date_from || "") + '"></div><div><label class="form-label">To</label><input class="form-input" id="consolidated-to" type="date" value="' + escAttr(filters.date_to || "") + '"></div><div class="management-filter-actions"><button class="btn btn-primary btn-sm" onclick="App.applyConsolidatedFilters()">Apply</button><button class="btn btn-secondary btn-sm" onclick="App.clearConsolidatedFilters()">Clear</button></div></div>';
+      '<div class="consolidated-filters"><div><label class="form-label">Workflow</label><select class="form-input" id="consolidated-workflow"><option value="">All workflows</option>'+workflowOptions+'</select></div><div><label class="form-label">Test-case Type</label><select class="form-input" id="consolidated-case-type"><option value="">All types</option>'+['positive','negative','edge'].map(function(t){return '<option value="'+t+'" '+(filters.test_case_type===t?'selected':'')+'>'+escHtml(t==='edge'?'Edge / Adverse':t)+'</option>';}).join('')+'</select></div><div><label class="form-label">Scenario</label><select class="form-input" id="consolidated-scenario"><option value="">All scenarios</option>' + scenarioOptions + '</select></div><div><label class="form-label">Outcome</label><select class="form-input" id="consolidated-status"><option value="">All outcomes</option>' + ["pass","fail","error","unknown"].map(function(value) { return '<option value="'+value+'" '+(filters.status===value?'selected':'')+'>'+value.toUpperCase()+'</option>'; }).join("") + '</select></div><div><label class="form-label">From</label><input class="form-input" id="consolidated-from" type="date" value="' + escAttr(filters.date_from || "") + '"></div><div><label class="form-label">To</label><input class="form-input" id="consolidated-to" type="date" value="' + escAttr(filters.date_to || "") + '"></div><div class="management-filter-actions"><button class="btn btn-primary btn-sm" onclick="App.applyConsolidatedFilters()">Apply</button><button class="btn btn-secondary btn-sm" onclick="App.clearConsolidatedFilters()">Clear</button></div></div>';
   },
 
   applyConsolidatedFilters() {
     State.consolidatedReportFilters = { scenario_id: document.getElementById("consolidated-scenario").value || "", status: document.getElementById("consolidated-status").value || "", date_from: document.getElementById("consolidated-from").value || "", date_to: document.getElementById("consolidated-to").value || "" };
+    State.consolidatedReportFilters.workflow_id = document.getElementById('consolidated-workflow').value || '';
+    State.consolidatedReportFilters.test_case_type = document.getElementById('consolidated-case-type').value || '';
     App.loadConsolidatedReport(State.managementAgentDetail);
   },
   clearConsolidatedFilters() { State.consolidatedReportFilters = { scenario_id: "", status: "", date_from: "", date_to: "" }; App.loadConsolidatedReport(State.managementAgentDetail); },
@@ -911,6 +918,28 @@ var App = window.App = {
     var period=x.selected_period||{}; var periodText=(period.from?fmtDate(period.from):"—")+" to "+(period.to?fmtDate(period.to):"—");
     return '<div class="consolidated-stat-grid consolidated-executive-grid">' + App._consolidatedCard("Mean Selected Run Score", x.mean_selected_run_score === null || x.mean_selected_run_score === undefined ? "—" : fmtScore(x.mean_selected_run_score), "primary") + App._consolidatedCard("Total Evaluation Runs", x.total_evaluation_runs) + App._consolidatedCard("Unique Scenarios", x.unique_scenarios) + App._consolidatedCard("Passed Runs", x.passed_runs, "pass") + App._consolidatedCard("Failed Runs", x.failed_runs, "fail") + App._consolidatedCard("Technical Errors", x.technical_errors, "warning") + App._consolidatedCard("Unknown Outcomes", x.unknown_outcomes) + App._consolidatedCard("Selected Evaluation Period",periodText,"period") + '</div><div class="consolidated-narrative"><h3>Performance Overview</h3><p>' + escHtml(x.performance_overview || "No selected evaluation data.") + '</p></div><div class="consolidated-highlight-grid">' + [["Strongest evaluated metric",x.strongest_evaluated_metric],["Weakest evaluated metric",x.weakest_evaluated_metric],["Most frequent quality issue",x.most_frequent_quality_issue],["Technical reliability",x.technical_reliability]].filter(function(i){return i[1];}).map(function(i){return '<div><span>'+escHtml(i[0])+'</span><strong>'+escHtml(i[1])+'</strong></div>';}).join("") + '</div>';
   },
+  _consolidatedOutcomeChart(distribution) {
+    if (!distribution) return '';
+    var slices = distribution.slices || [];
+    var content = '<h3>Evaluation Outcome Distribution</h3>';
+    if (distribution.represented_total > 0) {
+      var position = 0;
+      var stops = slices.filter(function(slice){return slice.count > 0;}).map(function(slice){
+        var start = position;
+        position += slice.percentage;
+        return slice.color+' '+start+'% '+position+'%';
+      });
+      var label = slices.map(function(slice){return slice.outcome+': '+slice.count+' ('+slice.percentage.toFixed(1)+'%)';}).join(', ');
+      content += '<div class="consolidated-outcome-layout"><div class="consolidated-outcome-donut" role="img" aria-label="'+escAttr(label)+'" style="background:conic-gradient('+escAttr(stops.join(','))+')"><strong>'+escHtml(distribution.represented_total)+'<small>represented</small></strong></div>';
+    } else {
+      content += '<p class="text-muted">No PASS, FAIL, or ERROR evaluation results are available for the selected report scope.</p><div class="consolidated-outcome-layout">';
+    }
+    content += '<ul class="consolidated-outcome-legend">'+slices.map(function(slice){
+      return '<li><span class="consolidated-outcome-swatch" style="background:'+escAttr(slice.color)+'" aria-hidden="true"></span><strong>'+escHtml(slice.outcome)+'</strong><span>'+escHtml(slice.count)+'</span><span>'+slice.percentage.toFixed(1)+'%</span></li>';
+    }).join('')+'</ul></div><p>Total represented: '+escHtml(distribution.represented_total)+'</p>';
+    if (distribution.unknown_count > 0) content += '<p class="text-muted">Unknown / unclassified: '+escHtml(distribution.unknown_count)+' (excluded from the pie distribution).</p>';
+    return content;
+  },
   _consolidatedCoverage(x) {
     var outcomes=x.outcome_distribution||{}; var scenarios=x.scenario_coverage||[]; var warnings=x.comparability_warnings||[];
     var metricCoverage=x.metric_coverage||[];
@@ -918,7 +947,35 @@ var App = window.App = {
   },
   _consolidatedMetrics(items) { return App._consolidatedTable(["Metric","Average","Evaluated","Pass","Fail","NOT EVALUATED","ERROR","Coverage"],items.map(function(i){return [i.name,i.average_score===null?"—":fmtScore(i.average_score),i.evaluated_count,i.pass_count,i.fail_count,i.not_evaluated_count,i.error_count,i.coverage];})); },
   _consolidatedScenarios(items) { return items.length ? App._consolidatedTable(["Scenario","Runs","Valid","Errors","Latest Valid Evaluation","Score","Outcome","Last Evaluated","Report"],items.map(function(i){return [i.scenario_id,i.total_runs,i.valid_runs,i.technical_errors,i.latest_valid_evaluation_id||"—",i.latest_valid_score===null?"—":fmtScore(i.latest_valid_score),(i.latest_valid_outcome||"—").toUpperCase(),i.last_evaluated?fmtDate(i.last_evaluated):"—",i.latest_valid_evaluation_id?'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.latest_valid_evaluation_id)+'">'+Icon.eye+' View Report</button>':"—"];}), true) : App._emptyStateHtml(Icon.doc,"No evaluations match this selection.","Adjust the report filters."); },
-  _consolidatedIssues(items) { if(!items.length)return '<p class="text-muted">No persisted critical failure evidence is available for this selection.</p>'; return '<div class="consolidated-issues">'+items.map(function(i){return '<article class="consolidated-issue '+(i.technical?'technical':'quality')+'"><div><span>'+(i.technical?'Technical Error':escHtml(i.metric||i.category))+'</span><strong>'+escHtml(i.scenario_id||"Unknown")+'</strong></div><p>'+escHtml(i.evidence||"Evidence available in the individual report.")+'</p><button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.evaluation_id)+'">'+Icon.eye+' '+escHtml(i.evaluation_id)+'</button></article>';}).join("")+'</div>'; },
+  _workflowReport(workflows, issues, mode) {
+    var html = workflows.map(function(workflow){
+      var body = '<div class="management-workflow"><h3>'+escHtml(workflow.workflow_name)+'</h3>';
+      if (mode !== "cases") {
+        body += '<p><b>Authored coverage: '+workflow.authored_total+' / '+workflow.required_total+'</b> <span class="badge '+(workflow.coverage_status==='COMPLETE'?'badge-pass':'badge-warning')+'">'+escHtml(workflow.coverage_status)+'</span></p>';
+        if (workflow.workflow_id) body += '<div class="management-workflow-coverage-table">'+App._consolidatedTable(['Type','Authored / Required','Missing'],['positive','negative','edge'].map(function(kind){return [kind==='edge'?'Edge / Adverse':kind,workflow.authored[kind]+' / '+workflow.required[kind],workflow.missing[kind]];}))+'</div>';
+        body += '<p>Distinct selected cases: attempted '+workflow.attempted+' · evaluated at least once '+workflow.evaluated+' · latest technical ERROR '+workflow.technical_errors+'</p><p>Selected evaluation runs: '+['pass','fail','error','unknown'].map(function(state){return state.toUpperCase()+' '+workflow.outcome_counts[state];}).join(' · ')+'</p>';
+      }
+      if (mode !== "coverage") body += App._consolidatedTable(['Test Case','Type','Version','Outcome','Score','Evaluation ID','Workflow Snapshot','Report'],workflow.cases.map(function(item){
+        return [item.test_case_id,item.test_case_type==='edge'?'Edge / Adverse':(item.test_case_type||'Legacy / Unclassified'),item.test_case_version||'Unrecorded',(item.outcome||'NO SELECTED RUN').toUpperCase(),item.score===null?'N/A':fmtScore(item.score),item.evaluation_id||'—',item.workflow_name||'Legacy / Unmapped',item.evaluation_id?'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(item.evaluation_id)+'">'+Icon.eye+' View Report</button>':'—'];
+      }),true);
+      return body+'</div>';
+    }).join('');
+    if (issues.length) html += '<div class="management-workflow-warnings"><h3>Catalog validation warnings</h3><ul>'+issues.map(function(issue){return '<li>'+escHtml(issue.code)+' · '+escHtml(issue.id||issue.file||'')+' '+escHtml((issue.files||[]).join(', '))+'</li>';}).join('')+'</ul></div>';
+    return (workflows.length && mode !== "cases" ? '<p class="text-muted">Authored coverage uses the current catalog. Execution coverage and outcomes use only selected evaluation runs.</p>' : '') + html;
+  },
+  _consolidatedScenarioFailures(items) {
+    if (!items.length) return '<p class="text-muted">No failed test scenarios were found for the selected report scope.</p>';
+    function paragraphs(label, values) { return (values || []).map(function(value){return '<p><b>'+label+':</b> '+escHtml(value)+'</p>';}).join(""); }
+    return items.map(function(scenario){
+      return '<div class="consolidated-scenario-failure"><h3>'+escHtml(scenario.scenario_id)+'</h3>'+scenario.evaluations.map(function(run){
+        var metadata=run.scenario_metadata||{};
+        return '<article class="consolidated-failed-run"><p><b>Workflow:</b> '+escHtml(metadata.workflow_name||'Legacy / Unmapped')+' · <b>Type:</b> '+escHtml(metadata.test_case_type||'Legacy / Unclassified')+'</p><header><span class="badge badge-fail">FAIL</span> <strong>Overall Score: '+(run.overall_score===null?'N/A':fmtScore(run.overall_score))+'</strong> <span>'+run.failed_metrics.length+' failed metrics</span></header><p>Evaluation: <code>'+escHtml(run.evaluation_id)+'</code></p><p><b>Failure Summary:</b> '+escHtml(run.summary)+'</p>'+run.failed_metrics.map(function(metric){
+          return '<div class="consolidated-failed-metric"><h4>'+escHtml(metric.name)+' · FAIL · '+(metric.score===null?'N/A':fmtScore(metric.score))+'</h4>'+(metric.reason?'<p><b>Reason:</b> '+escHtml(metric.reason)+'</p>':'')+paragraphs('Failure Summary',metric.failure_summaries)+paragraphs('Supporting Evidence',metric.evidence)+paragraphs('Recommended Action',metric.recommendations)+'</div>';
+        }).join("")+'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(run.evaluation_id)+'">'+Icon.eye+' View Report</button></article>';
+      }).join("")+'</div>';
+    }).join("");
+  },
+  _consolidatedIssues(items) { if(!items.length)return ''; return '<h3>Technical Errors (not scenario FAIL)</h3><div class="consolidated-issues">'+items.map(function(i){return '<article class="consolidated-issue '+(i.technical?'technical':'quality')+'"><div><span>'+(i.technical?'Technical Error':escHtml(i.metric||i.category))+'</span><strong>'+escHtml(i.scenario_id||"Unknown")+'</strong></div><p>'+escHtml(i.evidence||"Evidence available in the individual report.")+'</p><button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.evaluation_id)+'">'+Icon.eye+' '+escHtml(i.evaluation_id)+'</button></article>';}).join("")+'</div>'; },
   _consolidatedRecommendations(items) { return items.length?'<div class="consolidated-recommendations">'+items.map(function(i){return '<article><span class="badge badge-'+(i.priority==="High"?'fail':'warning')+'">'+escHtml(i.priority)+'</span><h3>'+escHtml(i.trigger)+'</h3><p>'+escHtml(i.recommendation)+'</p><small>Scenarios: '+escHtml((i.affected_scenarios||[]).join(", ")||"—")+' · Evidence: '+escHtml((i.evaluation_ids||[]).join(", ")||"—")+'</small></article>';}).join("")+'</div>':'<p class="text-muted">No evidence-backed recommendations were generated.</p>'; },
   _consolidatedHistory(x) { if(x.status==="comparable")return '<div class="consolidated-stat-grid">'+App._consolidatedCard("Previous Batch",x.previous_batch)+App._consolidatedCard("Current Batch",x.current_batch)+App._consolidatedCard("Previous Mean",x.previous_mean_score===null?"—":fmtScore(x.previous_mean_score))+App._consolidatedCard("Current Mean",x.current_mean_score===null?"—":fmtScore(x.current_mean_score))+App._consolidatedCard("Mean Change",x.mean_score_change===null?"—":fmtScore(x.mean_score_change))+'</div>'+App._consolidatedTable(["Metric","Previous","Current","Change"],(x.metric_changes||[]).map(function(i){return [i.metric,fmtScore(i.previous),fmtScore(i.current),fmtScore(i.change)];})); return '<div class="consolidated-history"><h3>'+escHtml(x.message||"Insufficient comparable evaluation history")+'</h3><ul>'+(x.reasons||[]).map(function(r){return '<li>'+escHtml(r)+'</li>';}).join("")+'</ul></div>'; },
   _consolidatedReferences(items) { return items.length?App._consolidatedTable(["Scenario","Evaluation ID","Timestamp","Outcome","Score","Technical Status","Report"],items.map(function(i){return [i.scenario_id,i.evaluation_id,i.timestamp?fmtDate(i.timestamp):"—",i.outcome.toUpperCase(),i.score===null?"—":fmtScore(i.score),i.technical_status,'<button class="btn btn-ghost btn-sm consolidated-individual-report" data-evaluation-id="'+escAttr(i.evaluation_id)+'">'+Icon.eye+' View Report</button>'];}),true):'<p class="text-muted">No included evaluation runs.</p>'; },

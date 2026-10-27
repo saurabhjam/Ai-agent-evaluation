@@ -3,6 +3,9 @@ scenario_id: appointment_inbound_calling
 agent:
   channel: calling
   adapter: vapi
+  config:
+    stt:
+      language: en
 
 persona:
   name: Rahul Sharma
@@ -31,6 +34,7 @@ persona:
 calling_simulator:
   mode: normal
   opening_message: "Hi, I'd like to schedule a routine dental appointment."
+  opening_fields: [appointment_reason]
   fields:
     name:
       aliases: ["name", "full name"]

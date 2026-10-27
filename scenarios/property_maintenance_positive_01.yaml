@@ -1,0 +1,38 @@
+scenario_id: property_maintenance_positive_01
+test_case:
+  workflow_id: property_maintenance
+  type: positive
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Report an urgent worsening kitchen ceiling leak at Mason & Main - B, unit B1207, and obtain the supported reporting outcome and next steps without assuming a submission occurred.
+  tone: Professional and concise
+context:
+  property_name: Mason & Main - B
+  unit_number: B1207
+  maintenance_issue: Water leaking from the ceiling
+  location_in_unit: Kitchen
+  urgency: Urgent
+  issue_progress: The leak is getting worse.
+  description: Water is leaking from the kitchen ceiling and the leak is getting worse.
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open by reporting water leaking from the kitchen ceiling, getting worse, and needing urgent attention; ask how to report it.
+  - When asked for property or unit, supply Mason & Main - B or B1207 respectively; all required maintenance details in context are available.
+  - Answer the latest question with the requested configured detail; retain facts already supplied instead of restarting the introduction.
+  - Keep the issue urgent throughout; ask for the supported next step and what happens after reporting.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; use only configured facts and explicit changes, of which there are none here.
+  - Tenant and ticket ID are unavailable; say so if asked and never fabricate them or treat Alex as a verified tenant identity.
+  - Do not claim submission succeeded merely because you requested it; distinguish supported creation with evidence from instructions for reporting through another supported route.
+  - Stay in this maintenance workflow, not rent, listings, residents, or portfolio analytics; finish when an evidenced outcome or a clear supported next step is explained.
+success_criteria:
+  - Recognizes maintenance intent and retains Mason & Main - B, B1207, kitchen ceiling leak, and worsening condition.
+  - Acknowledges urgency and provides appropriate supported guidance without inventing emergency contacts or response times.
+  - Collects necessary details without diverting to unrelated workflows.
+  - Creates a request only if supported and evidenced; otherwise explains the correct supported reporting step and what happens next.
+  - Does not fabricate a tenant, ticket, or successful submission.
+pass_threshold: 0.70

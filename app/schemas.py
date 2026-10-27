@@ -16,6 +16,7 @@ from typing import Optional, Any
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
+from app.workflow_models import TestCaseMetadata
 
 
 class Channel(str, Enum):
@@ -49,6 +50,8 @@ class AgentConfig(BaseModel):
 
 class TestScenario(BaseModel):
     scenario_id: str = Field(..., min_length=3, max_length=80)
+    test_case: Optional[TestCaseMetadata] = None
+    success_criteria: list[str] = Field(default_factory=list)
     agent: AgentConfig
     persona: Persona
     context: dict[str, Any] = Field(

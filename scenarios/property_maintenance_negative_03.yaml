@@ -1,0 +1,38 @@
+scenario_id: property_maintenance_negative_03
+test_case:
+  workflow_id: property_maintenance
+  type: negative
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Begin with an insufficient issue description at Mason & Main - B, B1207, reveal the loose kitchen cabinet hinge only after a relevant issue-clarification question, and continue the supported maintenance workflow.
+  tone: Initially vague then cooperative
+context:
+  property_name: Mason & Main - B
+  unit_number: B1207
+  initial_description: Something is wrong in my unit.
+  maintenance_issue: A kitchen cabinet hinge is loose and its door hangs unevenly.
+  location_in_unit: Kitchen cabinet
+  urgency: Non-urgent
+  description: A loose kitchen cabinet hinge makes its door hang unevenly, but it remains usable.
+  disclosure_trigger: Reveal the actual issue, location, and non-urgent state only after a relevant question about what is wrong, the location, description, or safety of the maintenance problem.
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open with Something is wrong in my unit and request maintenance help; supply Mason & Main - B and B1207 without revealing the actual issue yet.
+  - Before a relevant issue-clarification question, do not disclose the loose hinge, kitchen location, or urgency; a repeated greeting alone is not the trigger.
+  - When asked what is wrong, where the problem is, for a description, or about safety, supply the configured loose kitchen cabinet hinge details and non-urgent state.
+  - After clarification, answer the latest question using those facts and retain the already supplied property and unit.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; use only configured facts and explicit changes, of which there are none here.
+  - Tenant and ticket ID are unavailable; do not invent them or adopt an agent's guess about a different issue.
+  - Ask for the supported reporting outcome and next steps; accept a clear supported route if direct submission is unavailable.
+  - Correct clarification and recovery may succeed for this negative-input case; finish when the supported outcome or next step is clear.
+success_criteria:
+  - Detects that Something is wrong is insufficient and asks a relevant clarification rather than inventing the problem.
+  - Uses the subsequently supplied loose hinge description, kitchen location, and non-urgent state.
+  - Retains Mason & Main - B and B1207 through recovery and continues without an unnecessary restart.
+  - Provides a supported next step without fabricated submission; successful clarification may PASS, not necessarily FAIL.
+pass_threshold: 0.70

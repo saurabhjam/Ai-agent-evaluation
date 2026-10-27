@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.calling.config import CallingProviderConfig
 from app.calling.execution_context import CallingExecutionContext
 from app.calling.execution_pipeline import CallingExecutionPipeline
@@ -21,6 +23,19 @@ from app.calling.providers.mock import MockCallProvider
 from app.calling.providers.vapi import VapiProvider
 from app.calling.runner import CallSessionRunner
 from app.schemas import AgentConfig, Persona, TestScenario
+
+
+@pytest.fixture(autouse=True)
+def offline_provider_boundaries(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("offline provider unavailable")
+
+    def unavailable_websocket(*args, **kwargs):
+        raise RuntimeError("offline websocket unavailable")
+
+    monkeypatch.setattr("app.calling.providers.vapi.requests.post", unavailable)
+    monkeypatch.setattr("app.calling.providers.vapi.requests.get", unavailable)
+    monkeypatch.setattr("app.calling.voice_transport._default_websocket_factory", lambda: unavailable_websocket)
 
 
 def _scenario() -> TestScenario:
@@ -66,7 +81,7 @@ def test_configured_vapi_never_calls_run_mock_call(monkeypatch):
     )
 
     assert result.status == CallingExecutionStatus.failed
-    assert "prepares inbound calls via webhooks" in result.error
+    assert "offline provider unavailable" in result.error
 
 
 def test_configured_vapi_never_calls_build_mock_transcript(monkeypatch):
@@ -87,7 +102,7 @@ def test_configured_vapi_never_calls_build_mock_transcript(monkeypatch):
     )
 
     assert result.status == CallingExecutionStatus.failed
-    assert "prepares inbound calls via webhooks" in result.error
+    assert "offline provider unavailable" in result.error
 
 
 def test_configured_vapi_provider_failure_returns_error_not_mock_result(monkeypatch):

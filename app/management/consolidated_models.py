@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from app.workflow_models import ScenarioMetadata
 
 
 class ReportSelection(BaseModel):
+    workflow_id: str | None = None
+    test_case_type: str | None = None
     scenario_id: str | None = None
     status: str | None = None
     date_from: str | None = None
@@ -63,6 +66,7 @@ class ConsolidatedRecommendation(BaseModel):
 
 
 class ConsolidatedEvaluationReference(BaseModel):
+    scenario_metadata: ScenarioMetadata | None = None
     scenario_id: str
     evaluation_id: str
     timestamp: str | None = None
@@ -72,7 +76,47 @@ class ConsolidatedEvaluationReference(BaseModel):
     report_url: str
 
 
+class ScenarioFailedMetric(BaseModel):
+    name: str
+    score: float | None = None
+    status: Literal["FAIL"] = "FAIL"
+    reason: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    failure_summaries: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class ScenarioFailedEvaluation(BaseModel):
+    scenario_metadata: ScenarioMetadata | None = None
+    evaluation_id: str
+    outcome: Literal["fail"] = "fail"
+    overall_score: float | None = None
+    report_url: str
+    summary: str
+    failed_metrics: list[ScenarioFailedMetric]
+
+
+class ScenarioFailure(BaseModel):
+    scenario_id: str
+    evaluations: list[ScenarioFailedEvaluation]
+
+
+class OutcomeSlice(BaseModel):
+    outcome: Literal["PASS", "FAIL", "ERROR"]
+    count: int
+    percentage: float
+    color: str
+
+
+class OutcomeDistribution(BaseModel):
+    slices: list[OutcomeSlice] = Field(default_factory=list)
+    represented_total: int = 0
+    unknown_count: int = 0
+
+
 class ConsolidatedReport(BaseModel):
+    workflows: list[dict[str, Any]] = Field(default_factory=list)
+    catalog_issues: list[dict[str, Any]] = Field(default_factory=list)
     report_type: str = "EvalForge Consolidated Evaluation Report"
     generated_at: str
     agent_key: str
@@ -83,10 +127,12 @@ class ConsolidatedReport(BaseModel):
     selection: ReportSelection
     section_order: list[str]
     executive_summary: dict[str, Any]
+    outcome_distribution: OutcomeDistribution = Field(default_factory=OutcomeDistribution)
     evaluation_coverage: dict[str, Any]
     consolidated_metrics: list[ConsolidatedMetric]
     scenario_results: list[ScenarioResult]
     critical_failures: list[ConsolidatedIssue]
+    scenario_failures: list[ScenarioFailure] = Field(default_factory=list)
     recommendations: list[ConsolidatedRecommendation]
     historical_comparison: dict[str, Any]
     individual_reports: list[ConsolidatedEvaluationReference]

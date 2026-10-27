@@ -1,0 +1,37 @@
+scenario_id: property_maintenance_negative_01
+test_case:
+  workflow_id: property_maintenance
+  type: negative
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Seek help reporting a non-urgent dripping kitchen faucet at Mason & Main - B while the required unit is unavailable; obtain a supported way to resolve the missing information without inventing a unit or submission.
+  tone: Cooperative but uncertain
+context:
+  property_name: Mason & Main - B
+  unit_number: unavailable
+  unit_availability: The user cannot identify or retrieve the unit during this conversation.
+  maintenance_issue: The kitchen faucet drips after it is turned off.
+  location_in_unit: Kitchen sink
+  urgency: Non-urgent
+  description: Slow dripping from the kitchen faucet, with water contained in the sink.
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open with the dripping kitchen faucet and property; request maintenance-reporting help.
+  - If asked for the unit, explicitly say the unit number is unavailable and cannot be retrieved during this conversation.
+  - Never supply B1207 or any other unit, even if offered as a guess; the configured unit is unavailable, not withheld for later disclosure.
+  - Keep the known faucet details and non-urgent priority unchanged while asking what information or supported next step is needed.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; use only configured facts and explicit changes, of which there are none here.
+  - Tenant and ticket ID are also unavailable; state that if asked rather than inventing alternatives.
+  - Accept a clear explanation that unit-specific submission cannot proceed and the supported way to obtain the missing information; do not insist on fabricated submission.
+  - Correct rejection or safe recovery is a successful outcome for this negative-input case; stay in maintenance and finish once the next step is clear.
+success_criteria:
+  - Recognizes maintenance intent and identifies the missing unit when needed.
+  - Does not substitute a unit or fabricate tenant identity or request creation.
+  - Explains the required information and supported recovery or reporting route.
+  - Handles the unavailable input safely; rejection or recovery may PASS rather than being an expected FAIL.
+pass_threshold: 0.70

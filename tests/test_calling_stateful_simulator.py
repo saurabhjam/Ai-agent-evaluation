@@ -85,7 +85,37 @@ def _reply(simulator, question, template):
     with patch("app.calling.simulator.Groq") as groq:
         groq.return_value.chat.completions.create.return_value = response
         result = simulator(simulator.scenario.persona, [_turn("agent", question)])
-    return result, groq.return_value.chat.completions.create.call_args.kwargs["messages"]
+    call = groq.return_value.chat.completions.create.call_args
+    return result, call.kwargs["messages"] if call else []
+
+
+def test_semantic_terminal_state_skips_second_closing_response_and_groq():
+    simulator = StatefulCallingSimulator(_phone_scenario())
+    simulator.state.disclosed_fields = set(simulator.state.facts)
+    simulator.state.turn_number = 4
+
+    first, _ = _reply(simulator, "Is there anything else I can help you with?", "ignored")
+    with patch("app.calling.simulator.Groq") as groq:
+        second = simulator(
+            simulator.scenario.persona,
+            [_turn("agent", "Thank you for calling. Have a great day.")],
+        )
+
+    assert first["message"] == "No, that's all. Thank you."
+    assert second["message"] == "[END_CONVERSATION]"
+    assert second["completion_reason"] == "semantic_conversation_complete"
+    groq.assert_not_called()
+
+
+def test_missing_fact_and_non_closing_intents_do_not_terminate():
+    simulator = StatefulCallingSimulator(_phone_scenario())
+    simulator.state.no_further_request = True
+    simulator.state.disclosed_fields = {"name"}
+    result, _ = _reply(simulator, "Thank you for your name.", "ignored")
+    assert result["message"] != "[END_CONVERSATION]"
+
+    confirmation, _ = _reply(simulator, "Your name is Avery Stone, correct?", "ignored")
+    assert confirmation["message"] != "[END_CONVERSATION]"
 
 
 def test_name_request_discloses_only_name():

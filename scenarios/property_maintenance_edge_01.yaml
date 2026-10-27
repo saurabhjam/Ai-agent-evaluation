@@ -1,0 +1,43 @@
+scenario_id: property_maintenance_edge_01
+test_case:
+  workflow_id: property_maintenance
+  type: edge
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Report a small initially non-urgent kitchen ceiling leak at Mason & Main - B, B1207, then disclose the configured worsening event after the agent first acknowledges the request and have urgency updated without restarting.
+  tone: Calm initially then concerned
+  edge_case: After the first agent acknowledgment of the maintenance request, introduce the configured increased water flow exactly once on the next customer turn; priority becomes Urgent and never reverts.
+context:
+  property_name: Mason & Main - B
+  unit_number: B1207
+  maintenance_issue: Water leaking from the kitchen ceiling
+  location_in_unit: Kitchen
+  urgency: Non-urgent
+  description: A small slow ceiling drip is contained in a bucket and is initially non-urgent.
+  escalation_event:
+    trigger: On the next customer response after the agent first acknowledges the reported maintenance request, before any final confirmation.
+    initial_urgency: Non-urgent
+    later_urgency: Urgent
+    later_description: Water flow has increased and is spreading across the kitchen floor.
+    occurrence_limit: 1
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open with the small kitchen ceiling drip at Mason & Main - B, B1207; explicitly say it is contained in a bucket and currently non-urgent.
+  - Until the escalation_event trigger, describe only the initial slow drip and non-urgent state.
+  - On the next customer response after the first acknowledgment of this request, introduce the event exactly once before answering any other pending question or accepting a final outcome.
+  - Say that water flow has increased and is spreading across the kitchen floor, so the issue is now urgent; do not wait for the agent to invent worsening.
+  - After that event, keep urgency Urgent and the later description authoritative; retain the same property, unit, kitchen location, and original request.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; the escalation_event is the only permitted fact change.
+  - Tenant and ticket ID are unavailable; do not invent injuries, electrical hazards, emergency contacts, or guaranteed response times.
+  - Ask for the updated supported handling and next steps, without demanding or claiming unsupported submission; finish when the changed condition is addressed or a clear supported next step is given.
+success_criteria:
+  - Initially recognizes the configured non-urgent state, then updates urgency when the explicit worsening event is disclosed.
+  - Retains the original maintenance request, property, unit, and location instead of restarting or ignoring the change.
+  - Does not remain stuck on the original non-urgent priority or fabricate extra hazards.
+  - Provides supported urgent guidance or evidenced action and next steps; the edge category is not an expected ERROR.
+pass_threshold: 0.70

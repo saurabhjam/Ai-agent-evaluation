@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 from app.config import settings
+from app.scenario_catalog import ScenarioCatalog
+from app.scenario_metadata import persisted_metadata
+from app.management.workflow_coverage import build_workflows, scoped_catalog_issues
 from app.evaluation_store import list_evaluation_reports
 from app.management.identity import AgentIdentityResolver, evaluation_matches_agent, make_agent_key
 from app.management.models import (
@@ -35,10 +38,12 @@ class ManagementAggregationService:
         report_loader: Callable[[], list[dict[str, Any]]] | None = None,
         identity_resolver: AgentIdentityResolver | None = None,
         baseline_at: datetime | None = None,
+        catalog_loader=None,
     ) -> None:
         self._report_loader = report_loader or list_evaluation_reports
         self._identity_resolver = identity_resolver or AgentIdentityResolver()
         self._baseline_at = _utc(baseline_at or settings.management_baseline_at)
+        self._catalog_loader = catalog_loader or ScenarioCatalog
 
     def list_agents(
         self,
@@ -79,7 +84,16 @@ class ManagementAggregationService:
             metric_averages=_metric_averages(selected),
             scenarios=_scenario_summaries(selected),
             evaluations=[_reference(report) for report in _sort_reports(selected)],
+            **self.workflow_data(agent_key, _sort_reports(selected)),
         )
+
+    def workflow_data(self, agent_key, reports, workflow_id=None):
+        catalog = self._catalog_loader()
+        workflows = build_workflows(catalog, reports, agent_key, _outcome, _score)
+        if workflow_id is not None:
+            workflows = [item for item in workflows if item["workflow_id"] == workflow_id]
+        return {"workflows": workflows,
+                "catalog_issues": scoped_catalog_issues(catalog, workflows, agent_key, workflow_id)}
 
     def list_evaluations(
         self,
@@ -91,6 +105,8 @@ class ManagementAggregationService:
         status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        workflow_id: str | None = None,
+        test_case_type: str | None = None,
     ) -> PaginatedEvaluations:
         detail = self.get_agent(agent_key)
         reports = [report for report in self._reports() if evaluation_matches_agent(report, agent_key)]
@@ -102,6 +118,7 @@ class ManagementAggregationService:
             reports = [report for report in reports if (_timestamp(report) and _timestamp(report) >= _utc(date_from))]
         if date_to:
             reports = [report for report in reports if (_timestamp(report) and _timestamp(report) <= _utc(date_to))]
+        reports = _filter_case_metadata(reports, workflow_id, test_case_type)
         references = [_reference(report) for report in _sort_reports(reports)]
         items, total, pages = _paginate(references, page, page_size)
         return PaginatedEvaluations(
@@ -121,6 +138,8 @@ class ManagementAggregationService:
         status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        workflow_id: str | None = None,
+        test_case_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return defensive copies of qualifying reports for read-only consumers."""
         self.get_agent(agent_key)
@@ -133,7 +152,7 @@ class ManagementAggregationService:
             reports = [report for report in reports if (_timestamp(report) and _timestamp(report) >= _utc(date_from))]
         if date_to:
             reports = [report for report in reports if (_timestamp(report) and _timestamp(report) <= _utc(date_to))]
-        return _sort_reports(reports)
+        return _sort_reports(_filter_case_metadata(reports, workflow_id, test_case_type))
 
     def _reports(self) -> list[dict[str, Any]]:
         # Defensive copies guarantee the management layer cannot mutate loader-owned payloads.
@@ -155,6 +174,12 @@ class ManagementAggregationService:
             overall_average_score=_average(valid_scores),
             comparability_warnings=_comparability_warnings(reports),
         )
+
+
+def _filter_case_metadata(reports, workflow_id=None, test_case_type=None):
+    return [report for report in reports
+            if (workflow_id is None or persisted_metadata(report).workflow_id == workflow_id)
+            and (test_case_type is None or persisted_metadata(report).test_case_type == test_case_type)]
 
 
 def _group_reports(reports: Iterable[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -263,6 +288,7 @@ def _reference(report: dict[str, Any]) -> EvaluationReference:
     evaluation_id = str(report.get("evaluation_id") or "")
     timestamp = _timestamp(report)
     return EvaluationReference(
+        scenario_metadata=persisted_metadata(report),
         evaluation_id=evaluation_id,
         scenario_id=str(report.get("scenario_id")) if report.get("scenario_id") is not None else None,
         created_at=timestamp.isoformat() if timestamp else None,
@@ -279,7 +305,7 @@ def _comparability_warnings(reports: list[dict[str, Any]]) -> list[str]:
     warnings: list[str] = []
     if any(not report.get("evaluation_config_hash") for report in reports):
         warnings.append("Historical evaluator configuration cannot be verified for every run.")
-    if any(not report.get("scenario_version") and not report.get("scenario_hash") for report in reports):
+    if any(not report.get("scenario_version") and not report.get("scenario_hash") and not persisted_metadata(report).scenario_hash for report in reports):
         warnings.append("Historical scenario versions cannot be verified for every run.")
     metric_sets = {tuple(sorted(str(metric.get("name")) for metric in report.get("metrics") or [] if isinstance(metric, dict))) for report in reports}
     if len(metric_sets) > 1:

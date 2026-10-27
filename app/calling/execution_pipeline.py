@@ -259,6 +259,7 @@ class CallingExecutionPipeline:
                         "scenario_id": context.scenario.scenario_id,
                         "provider": context.provider_config.provider_name,
                         "simulator_contract_violations": _simulator_contract_violations(transport_transcript),
+                        **_conversation_runtime_metadata(transport_transcript),
                     },
                     provider_metadata=session.provider_metadata,
                     duration_seconds=_duration_seconds(started_at, utc_now_iso()),
@@ -287,6 +288,7 @@ class CallingExecutionPipeline:
                     "context_run_id": context.run_id,
                     "context_session_id": context.session_id,
                     "simulator_contract_violations": _simulator_contract_violations(transport_transcript),
+                    **_conversation_runtime_metadata(transport_transcript),
                 },
                 provider_metadata=session.provider_metadata,
                 duration_seconds=_duration_seconds(started_at, utc_now_iso()),
@@ -480,6 +482,15 @@ def _simulator_contract_violations(transcript) -> list[dict]:
     return list((transcript.metadata or {}).get("simulator_contract_violations") or [])
 
 
+def _conversation_runtime_metadata(transcript) -> dict:
+    metadata = getattr(transcript, "metadata", None) or {}
+    return {
+        key: metadata[key]
+        for key in ("completion_reason", "latency_turns", "conversation_lifecycle")
+        if metadata.get(key) not in (None, [], {})
+    }
+
+
 def _client_agent_phone_number(context: CallingExecutionContext, *, fallback: str) -> str:
     settings = context.provider_config.settings or {}
     candidate = (
@@ -540,7 +551,8 @@ def _transport_supports_conversation(transport) -> bool:
 
 def _voice_conversation_runner(context: CallingExecutionContext) -> VoiceConversationRunner:
     settings = context.provider_config.settings or {}
-    stt_config = settings.get("stt") or {}
+    scenario_config = getattr(context.scenario.agent, "config", None) or {}
+    stt_config = {**(scenario_config.get("stt") or {}), **(settings.get("stt") or {})}
     tts_config = settings.get("tts") or {}
     try:
         from app.adapters.voice.local import FasterWhisperSTT, PiperTTS

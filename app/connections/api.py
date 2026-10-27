@@ -36,6 +36,7 @@ from app.evaluation_service import EvaluationResult, EvaluationService
 from app.evaluation_store import save_evaluation_report
 from app.executor import ScenarioExecutor
 from app.schemas import TestScenario
+from app.scenario_metadata import snapshot_scenario
 from app.connections.browser_auth import BrowserAuthCheck, browser_auth_manager
 
 logger = logging.getLogger(__name__)
@@ -374,6 +375,7 @@ def evaluate_connection(connection_id: str, request: EvaluationRequest):
             scen_data = yaml.safe_load(f)
         scenario = TestScenario(**scen_data)
         scenario = _merge_backend_validation_into_scenario(scenario, connection)
+        scenario_metadata = snapshot_scenario(scenario, source_path=scenario_file)
     except Exception as e:
         logger.error(f"Failed to load scenario {request.scenario_path}: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid scenario format: {e}")
@@ -409,6 +411,7 @@ def evaluate_connection(connection_id: str, request: EvaluationRequest):
         eval_service = EvaluationService()
         eval_result = eval_service.evaluate(exec_result, scenario)
         eval_result.evaluation_id = eval_id
+        eval_result.scenario_metadata = scenario_metadata
         saved = save_evaluation_report(eval_result.model_dump(mode="json"))
         eval_result = eval_result.model_copy(update={"evaluation_id": saved["evaluation_id"]})
         logger.warning("[VOICE DEBUG 16] evaluation completed")

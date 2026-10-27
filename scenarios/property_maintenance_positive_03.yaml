@@ -1,0 +1,38 @@
+scenario_id: property_maintenance_positive_03
+test_case:
+  workflow_id: property_maintenance
+  type: positive
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Report a non-urgent sticking bathroom door at Mason & Main - B, initially withhold only the available unit B1207, supply it when requested, and continue the supported maintenance process without restarting.
+  tone: Helpful and concise
+context:
+  property_name: Mason & Main - B
+  unit_number: B1207
+  initially_withheld_field: unit_number
+  disclosure_trigger: Supply B1207 when the agent asks for the unit or missing unit information.
+  maintenance_issue: The bathroom door sticks when closing.
+  location_in_unit: Bathroom door
+  urgency: Non-urgent
+  description: The bathroom door sticks but opens and closes; nobody is trapped.
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open by naming Mason & Main - B, the sticking bathroom door, and non-urgent priority; omit only the unit number from the available maintenance details.
+  - Withhold B1207 until the agent asks for the unit or missing unit information, then supply B1207 directly; it is available, not unknown.
+  - After supplying the unit, continue the same request and answer follow-up questions without repeating the whole introduction.
+  - Keep the door usable and the priority non-urgent; do not invent a lockout, trapped person, or worsening condition.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; use only configured facts and explicit changes, of which there are none here.
+  - Tenant and ticket ID are unavailable; say so if asked and never claim Alex is a verified tenant.
+  - Ask for the supported reporting outcome and next steps; do not demand or claim creation if the integration can only explain reporting.
+  - Stay in maintenance and finish once a supported outcome or appropriate next step is clear.
+success_criteria:
+  - Requests the missing unit information rather than inventing it.
+  - Retains the property, bathroom door problem, and non-urgent priority while collecting B1207.
+  - Continues the original workflow after clarification instead of unnecessarily restarting.
+  - Explains supported reporting or evidenced creation and next steps without fabricated tenant, ticket, or submission data.
+pass_threshold: 0.70

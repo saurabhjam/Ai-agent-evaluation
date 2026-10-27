@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from app.log_stream import log_manager
 from app.interaction_protocol import interaction_manager
+from app.scenario_metadata import persisted_metadata
 
 from app.evaluation_store import delete_evaluation_report, get_evaluation_report, list_evaluation_reports
 from app.calling.recording_artifacts import recording_response
@@ -277,6 +278,7 @@ def download_evaluation_recording(evaluation_id: str, artifact_id: str, request:
 
 def _summary(report: dict[str, Any]) -> dict[str, Any]:
     return {
+        "scenario_metadata": persisted_metadata(report).model_dump(),
         "evaluation_id": report.get("evaluation_id"),
         "connection_id": report.get("connection_id") or report.get("agent_id"),
         "agent_id": report.get("agent_id") or report.get("connection_id"),

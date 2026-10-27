@@ -33,6 +33,7 @@ class CallingSimulatorConfig(BaseModel):
         "refusal",
     ] = "normal"
     opening_message: str | None = None
+    opening_fields: list[str] = Field(default_factory=list)
     volunteer_fields: list[str] = Field(default_factory=list)
     refuse_fields: list[str] = Field(default_factory=list)
     fields: dict[str, CallingFactConfig] = Field(default_factory=dict)

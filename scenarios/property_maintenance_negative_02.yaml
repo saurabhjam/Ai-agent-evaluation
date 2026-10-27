@@ -1,0 +1,38 @@
+scenario_id: property_maintenance_negative_02
+test_case:
+  workflow_id: property_maintenance
+  type: negative
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Ask to report a non-urgent sticking kitchen drawer at Mason & Main - B using an explicitly invalid test unit, then obtain safe clarification or a supported recovery step without silently substituting another unit.
+  tone: Polite and receptive
+context:
+  property_name: Mason & Main - B
+  unit_number: INVALID-UNIT-NOT-REGISTERED-000
+  identifier_validity: Intentionally invalid synthetic test input, not a real or verified backend unit.
+  corrected_unit_number: unavailable
+  maintenance_issue: A kitchen drawer sticks when pulled open.
+  location_in_unit: Kitchen drawer
+  urgency: Non-urgent
+  description: One kitchen drawer sticks but can still be opened, with no immediate hazard.
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open with the kitchen drawer problem and explicitly supplied unit INVALID-UNIT-NOT-REGISTERED-000 at Mason & Main - B.
+  - Repeat that exact identifier if asked what you entered; do not disguise it as a verified real unit.
+  - When asked to correct or verify the identifier, explain that you cannot provide a valid corrected unit in this conversation.
+  - Do not silently replace the invalid identifier with B1207 or any suggested unit; a corrected unit is unavailable.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; use only configured facts and explicit changes, of which there are none here.
+  - Tenant and ticket ID are unavailable; do not fabricate them to bypass identifier checks.
+  - Ask for the supported recovery route; if lookup is unavailable, accept an honest limitation and clarification instead of demanding a nonexistent backend validation capability.
+  - Correct rejection or recovery may succeed; never claim a request was submitted against this unverified identifier, and finish at a clear safe next step.
+success_criteria:
+  - Recognizes the supplied identifier requires verification or correction rather than treating it as established valid identity.
+  - Where validation is supported, rejects the invalid input; otherwise honestly explains the limitation and requests clarification or provides a safe supported route.
+  - Does not silently substitute a property/unit or fabricate a successful request.
+  - Correct rejection or safe recovery may PASS; the negative category does not prescribe FAIL.
+pass_threshold: 0.70

@@ -99,6 +99,9 @@ def list_scenarios():
     List available evaluation scenario YAML files.
     Returns id, channel, and relative path for each scenario.
     """
+    from app.scenario_catalog import ScenarioCatalog
+    catalog = ScenarioCatalog(scenarios_dir=_SCENARIOS_DIR)
+    discovered = {entry["path"]: entry for entry in catalog.discovery()}
     results = []
     if not _SCENARIOS_DIR.exists():
         return results
@@ -119,6 +122,7 @@ def list_scenarios():
                 channel = "calling"
             relative_path = str(yaml_file.relative_to(Path(__file__).parent.parent)).replace("\\", "/")
             results.append({
+                **discovered.get(relative_path, {}),
                 "id": scenario_id,
                 "channel": channel,
                 "path": relative_path,
@@ -126,6 +130,13 @@ def list_scenarios():
         except Exception as e:
             logger.warning(f"Could not parse scenario file {yaml_file}: {e}")
     return results
+
+
+@app.get("/scenarios/catalog")
+def get_scenario_catalog():
+    from app.scenario_catalog import ScenarioCatalog
+    catalog = ScenarioCatalog(scenarios_dir=_SCENARIOS_DIR)
+    return {"scenarios": catalog.discovery(), "workflows": [w.model_dump() for w in catalog.workflows.values()], "issues": catalog.issues}
 
 
 
@@ -139,7 +150,8 @@ def validate_scenario(payload: dict):
             raise ValueError("YAML must be a dictionary")
         # Validate against schema
         from app.schemas import TestScenario
-        TestScenario(**data)
+        from app.scenario_catalog import ScenarioCatalog
+        ScenarioCatalog(scenarios_dir=_SCENARIOS_DIR).resolve(TestScenario(**data))
         return {"status": "ok", "message": "Valid scenario"}
     except ValidationError as e:
         # Return first pydantic error nicely
@@ -171,7 +183,10 @@ def save_scenario(payload: dict):
         if not isinstance(data, dict):
             raise ValueError("YAML must be a dictionary")
         from app.schemas import TestScenario
-        TestScenario(**data)
+        from app.scenario_catalog import ScenarioCatalog
+        catalog = ScenarioCatalog(scenarios_dir=_SCENARIOS_DIR)
+        parsed = TestScenario(**data)
+        catalog.resolve(parsed, source_path=_SCENARIOS_DIR / clean_filename)
     except ValidationError as e:
         err = e.errors()[0]
         field = ".".join(str(loc) for loc in err["loc"])

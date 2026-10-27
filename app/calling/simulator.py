@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 import re
+import time
 from typing import Any
 
 from groq import Groq
@@ -57,6 +58,8 @@ class PersonaState:
     requested_fields: list[str] = field(default_factory=list)
     turn_number: int = 0
     last_agent_utterance: str = ""
+    no_further_request: bool = False
+    completion_reason: str | None = None
 
 
 class AgentTurnIntentType(str, Enum):
@@ -100,11 +103,44 @@ class StatefulCallingSimulator:
         if not latest_agent:
             return {"message": "", "spoken_message": "", "attachments": None}
 
+        intent_started = time.perf_counter()
+        prior_requested = list(self.state.requested_fields)
         intent = _interpret_agent_turn(latest_agent, transcript, self.state)
+        if intent.intent in {AgentTurnIntentType.REQUEST_FACT, AgentTurnIntentType.REQUEST_CORRECTION}:
+            self.state.no_further_request = False
         plan = self._plan(intent)
+        diagnostics.emit("simulator.policy", "calling_simulator", {
+            "intent": intent.intent.value,
+            "mentioned_fields": list(intent.mentioned_fields),
+            "requested_fields": list(intent.requested_fields),
+            "prior_requested_fields": prior_requested,
+            "disclosed_fields": sorted(self.state.disclosed_fields),
+            "configured_fields": sorted(self.state.facts),
+            "action": plan.action,
+            "allowed_fields": list(plan.fields),
+            "groq_required": _requires_naturalization(plan),
+        })
+        intent_policy_ms = (time.perf_counter() - intent_started) * 1000
+        if self._session_complete(intent):
+            self.state.completion_reason = "semantic_conversation_complete"
+            diagnostics.emit(
+                "simulator.session_complete", "calling_simulator",
+                {"completion_reason": self.state.completion_reason},
+                duration_ms=intent_policy_ms,
+            )
+            return {
+                "message": "[END_CONVERSATION]",
+                "spoken_message": "",
+                "attachments": None,
+                "completion_reason": self.state.completion_reason,
+                "timings": {"intent_policy_ms": intent_policy_ms, "groq_ms": 0.0, "grounding_ms": 0.0},
+            }
         canonical_values = {key: self._value_for(key, spoken=False) for key in plan.fields}
         spoken_values = {key: self._value_for(key, spoken=True) for key in plan.fields}
+        groq_started = time.perf_counter()
         template = self._naturalize(plan, latest_agent)
+        groq_ms = (time.perf_counter() - groq_started) * 1000 if _requires_naturalization(plan) else 0.0
+        grounding_started = time.perf_counter()
         fallback_triggered = not _valid_template(template, plan.fields, self.state.facts)
         if fallback_triggered:
             template = _fallback_template(plan)
@@ -121,9 +157,16 @@ class StatefulCallingSimulator:
             key for key in plan.fields
             if canonical_values.get(key) and canonical_values[key].lower() in canonical.lower()
         ]
+        if plan.action == "opening" and self.config.opening_message:
+            # Scenario authors explicitly identify facts conveyed by the opening paraphrase.
+            communicated_fields.extend(
+                key for key in self.config.opening_fields
+                if key in self.state.facts and key not in self.config.refuse_fields
+                and key not in communicated_fields
+            )
         contract_valid = _response_contract_valid(
             canonical,
-            plan.fields,
+            tuple(dict.fromkeys((*plan.fields, *communicated_fields))),
             communicated_fields,
             self.state.facts,
         )
@@ -131,6 +174,9 @@ class StatefulCallingSimulator:
         self.state.disclosed_fields.update(communicated_fields)
         self.state.turn_number += 1
         self.state.last_agent_utterance = latest_agent
+        if plan.action == "closing" and self._required_facts_complete():
+            self.state.no_further_request = True
+        grounding_ms = (time.perf_counter() - grounding_started) * 1000
         diagnostics.emit(
             "simulator.contract",
             "calling_simulator",
@@ -143,6 +189,9 @@ class StatefulCallingSimulator:
                 "communicated_fields": communicated_fields,
                 "fallback_triggered": fallback_triggered,
                 "contract_valid": contract_valid,
+                "disclosed_fields": sorted(self.state.disclosed_fields),
+                "missing_fields": sorted(set(self.state.facts) - self.state.disclosed_fields),
+                "no_further_request": self.state.no_further_request,
             },
         )
         return {
@@ -160,7 +209,24 @@ class StatefulCallingSimulator:
                 "communicated_fields": communicated_fields,
                 "fallback_triggered": fallback_triggered,
             },
+            "timings": {
+                "intent_policy_ms": intent_policy_ms,
+                "groq_ms": groq_ms,
+                "grounding_ms": grounding_ms,
+            },
         }
+
+    def _required_facts_complete(self) -> bool:
+        required = set(self.state.facts) - set(self.config.refuse_fields)
+        return bool(required) and required.issubset(self.state.disclosed_fields)
+
+    def _session_complete(self, intent: AgentTurnIntent) -> bool:
+        return (
+            intent.intent == AgentTurnIntentType.CLOSING
+            and self.state.no_further_request
+            and self._required_facts_complete()
+            and not self.state.requested_fields
+        )
 
     def _plan(self, intent: AgentTurnIntent) -> ResponsePlan:
         if intent.intent in {AgentTurnIntentType.CONFIRM_FACT, AgentTurnIntentType.TASK_CONFIRMATION}:
@@ -210,6 +276,8 @@ class StatefulCallingSimulator:
     def _naturalize(self, plan: ResponsePlan, latest_agent: str) -> str:
         if plan.action == "opening" and self.config.opening_message:
             return self.config.opening_message + _field_suffix(plan.fields)
+        if not _requires_naturalization(plan):
+            return _fallback_template(plan)
         allowed = {key: f"{{{{fact:{key}}}}}" for key in plan.fields}
         prompt = (
             "You are the CUSTOMER in a voice call. The external speaker is the AGENT being evaluated.\n"
@@ -366,8 +434,10 @@ def _explicitly_requested_fields(agent_text: str, facts: dict[str, PersonaFact])
     matches: list[str] = []
     for clause in clauses:
         request_language = bool(re.search(
-            r"\b(?:what|which)\b|"
-            r"\b(?:may|can|could|would)\s+i\s+(?:have|get|take|know)\b|"
+            r"\b(?:what|which|when|where)\b|"
+            r"\b(?:may|can|could|would)\s+i\s+(?:please\s+)?(?:have|get|take|know)\b|"
+            r"\blet\s+me\s+know\b|"
+            r"\bis there\s+(?:a|an|any)\s+(?:specific\s+)?\b|"
             r"\b(?:please\s+)?(?:provide|share|give|tell|repeat|clarify)\b|"
             r"\b(?:do|would|could|can)\s+you\s+(?:provide|share|give|tell|repeat|clarify)\b|"
             r"\b(?:need|require)\s+(?:to\s+(?:know|have)\s+)?your\b",
@@ -378,6 +448,16 @@ def _explicitly_requested_fields(agent_text: str, facts: dict[str, PersonaFact])
         for key in _mentioned_fields(clause, facts):
             if key not in matches:
                 matches.append(key)
+        if not matches and re.search(
+            r"\bwhen\s+(?:(?:would|do|could)\s+you\s+(?:like|prefer|want)|works\s+for\s+you)\b",
+            clause,
+        ):
+            temporal = [
+                key for key, fact in facts.items()
+                if any(re.search(r"\b(?:date|day)\b", alias) for alias in fact.aliases)
+            ]
+            if len(temporal) == 1:
+                matches.append(temporal[0])
     return matches
 
 
@@ -461,6 +541,10 @@ def _fallback_template(plan: ResponsePlan) -> str:
     if plan.action == "opening":
         return "I'd like help with my request."
     return "Okay."
+
+
+def _requires_naturalization(plan: ResponsePlan) -> bool:
+    return plan.action in {"facts", "opening"} and bool(plan.fields)
 
 
 def _field_suffix(fields: tuple[str, ...]) -> str:

@@ -1,0 +1,37 @@
+scenario_id: property_maintenance_positive_02
+test_case:
+  workflow_id: property_maintenance
+  type: positive
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Report a loose kitchen cabinet handle at Mason & Main - B, unit B1207, as routine non-urgent maintenance and understand the supported reporting process and next steps.
+  tone: Calm and cooperative
+context:
+  property_name: Mason & Main - B
+  unit_number: B1207
+  maintenance_issue: A kitchen cabinet handle is loose.
+  location_in_unit: Kitchen cabinet
+  urgency: Non-urgent
+  issue_progress: Stable; the cabinet still opens and closes, with no injury or immediate hazard.
+  description: One kitchen cabinet handle is loose, but the cabinet remains usable.
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open with a routine maintenance request for the loose kitchen cabinet handle; explicitly say it is non-urgent.
+  - Supply Mason & Main - B and B1207 when asked; describe the stable usable cabinet and loose handle when requested.
+  - Answer the latest question only with the relevant configured facts and remember previously supplied details.
+  - Do not escalate urgency or invent a leak, injury, or safety hazard; nothing changes during this scenario.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; use only configured facts and explicit changes, of which there are none here.
+  - Tenant and ticket ID are unavailable; say so if asked and do not turn Alex into a verified tenant identity.
+  - Ask how this routine request will be handled; accept clear supported reporting instructions if direct creation is unavailable, without pretending submission occurred.
+  - Stay in maintenance rather than unrelated rent, listing, or portfolio workflows; finish after a clear supported outcome and next step.
+success_criteria:
+  - Retains the valid property/unit and the loose kitchen cabinet handle description.
+  - Treats the stable usable cabinet as routine rather than inventing an emergency.
+  - Provides supported reporting or creation guidance and explains next steps.
+  - Does not fabricate tenant details, ticket IDs, response times, or submission success.
+pass_threshold: 0.70

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from app.workflow_models import ScenarioMetadata
 
 
 class OutcomeCounts(BaseModel):
@@ -24,6 +25,7 @@ class MetricAverage(BaseModel):
 class EvaluationReference(BaseModel):
     evaluation_id: str
     scenario_id: str | None = None
+    scenario_metadata: ScenarioMetadata | None = None
     created_at: str | None = None
     status: Literal["pass", "fail", "error", "unknown"]
     overall_score: float | None = None
@@ -57,6 +59,8 @@ class AgentSummary(BaseModel):
 
 
 class AgentDetail(AgentSummary):
+    workflows: list[dict[str, Any]] = Field(default_factory=list)
+    catalog_issues: list[dict[str, Any]] = Field(default_factory=list)
     metric_averages: list[MetricAverage] = Field(default_factory=list)
     scenarios: list[ScenarioSummary] = Field(default_factory=list)
     evaluations: list[EvaluationReference] = Field(default_factory=list)

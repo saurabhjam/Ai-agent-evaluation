@@ -1,0 +1,43 @@
+scenario_id: property_maintenance_edge_02
+test_case:
+  workflow_id: property_maintenance
+  type: edge
+  version: "1"
+agent:
+  channel: chatbot
+persona:
+  name: Alex
+  goal: Report a non-urgent dripping faucet at Mason & Main - B, B1207, initially state Kitchen, then explicitly correct the location to Bathroom on the first maintenance follow-up and ensure only the corrected location is used.
+  tone: Cooperative and self-correcting
+  edge_case: Correct the initial Kitchen location to Bathroom exactly once on the first agent maintenance follow-up; Bathroom is authoritative thereafter and the correction must precede any final confirmation.
+context:
+  property_name: Mason & Main - B
+  unit_number: B1207
+  maintenance_issue: The faucet drips after it is turned off.
+  location_in_unit: Bathroom
+  urgency: Non-urgent
+  description: A faucet drips slowly into the sink; no flooding or immediate hazard.
+  location_correction:
+    initial_value: Kitchen
+    corrected_value: Bathroom
+    trigger: On the next customer response to the first agent maintenance follow-up, including a clarification, summary, or closing response.
+    authoritative_value: Bathroom
+    occurrence_limit: 1
+  tenant: unavailable
+  ticket_id: unavailable
+  submission_result: unknown until supported evidence is provided
+behavior:
+  - Open with a non-urgent dripping kitchen faucet at Mason & Main - B, B1207; Kitchen is the explicitly configured initial mistaken location, not an invented second request.
+  - On the first agent maintenance follow-up, before answering other questions or confirming a result, say you need to correct the location from Kitchen to Bathroom.
+  - Introduce this correction exactly once; if asked which location is correct, answer Bathroom only and keep the same single faucet issue, property, unit, and non-urgent state.
+  - After correction, do not oscillate between locations or combine them into two requests; correct any later kitchen summary without restarting the introduction.
+  - Do not invent property, unit, maintenance issue, location, urgency, tenant, ticket ID, or submission result; the location_correction is the only permitted fact change.
+  - Tenant and ticket ID are unavailable; never invent a second unit, tenant, escalation, or submission to resolve the conflict.
+  - Do not confirm a final request using Kitchen after the correction; ask for Bathroom to be used before any supported submission, or for an honest supported correction route if action already occurred.
+  - Finish at a supported outcome or clear next step using the corrected location; do not claim that a submission or amendment occurred without evidence.
+success_criteria:
+  - Recognizes or safely clarifies the conflict between the initial Kitchen location and corrected Bathroom location.
+  - Treats Bathroom as authoritative after clarification and retains the same property, unit, issue, and non-urgent state.
+  - Does not combine incompatible values or falsely submit or confirm against the superseded kitchen location.
+  - Explains supported creation or correction steps without fabrication; this edge case is not an expected ERROR.
+pass_threshold: 0.70

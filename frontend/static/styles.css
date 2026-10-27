@@ -2975,6 +2975,28 @@ body.failure-modal-open .toast-container {
 .consolidated-report-shell .btn svg { display: block; height: 100%; max-height: 16px; max-width: 16px; width: 100%; }
 .consolidated-history h3 { margin: 0 0 8px; }.consolidated-history li { color: var(--text-secondary); margin: 5px 0; }
 .consolidated-issues,.consolidated-recommendations { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.management-workflow { min-width: 0; margin: 20px 0; padding-top: 12px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.management-workflow h3 { font-size: 16px; margin-bottom: 12px; }
+.management-workflow-coverage-table .consolidated-table { min-width: 0; width: 100%; table-layout: fixed; }
+.management-workflow-coverage-table .consolidated-table th,.management-workflow-coverage-table .consolidated-table td { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.management-workflow p { line-height: 1.6; margin: 10px 0; }
+.management-workflow-warnings { border-left: 3px solid var(--warning); padding: 12px; overflow-wrap: anywhere; }
+.consolidated-outcome-layout { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; margin: 16px 0; }
+.consolidated-outcome-donut { position: relative; width: 180px; height: 180px; flex: 0 0 180px; border-radius: 50%; display: grid; place-items: center; }
+.consolidated-outcome-donut::before { content: ''; position: absolute; inset: 30px; border-radius: 50%; background: var(--bg-card); }
+.consolidated-outcome-donut strong { position: relative; text-align: center; font-size: 24px; }
+.consolidated-outcome-donut small { display: block; font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+.consolidated-outcome-legend { list-style: none; padding: 0; margin: 0; width: 260px; max-width: 100%; }
+.consolidated-outcome-legend li { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 12px; align-items: center; padding: 8px 0; }
+.consolidated-outcome-legend li > span:last-child { min-width: 54px; text-align: right; color: var(--text-secondary); }
+.consolidated-outcome-swatch { width: 12px; height: 12px; border-radius: 2px; }
+.consolidated-scenario-failure { min-width: 0; overflow-wrap: anywhere; margin: 20px 0; }
+.consolidated-failed-run { border: 1px solid var(--border); border-left: 4px solid #ef4444; border-radius: 6px; padding: 16px; margin: 12px 0; min-width: 0; }
+.consolidated-failed-run header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.consolidated-failed-run p { color: var(--text-secondary); line-height: 1.55; white-space: pre-wrap; }
+.consolidated-failed-run code { overflow-wrap: anywhere; white-space: normal; }
+.consolidated-failed-metric { border-top: 1px solid var(--border); padding: 12px 0; }
+.consolidated-failed-metric h4 { font-size: 14px; margin: 0 0 8px; }
 .consolidated-issue,.consolidated-recommendations article { background: rgba(255,255,255,.025); border: 1px solid var(--border); padding: 15px; }
 .consolidated-issue.quality { border-left: 4px solid #ef4444; }.consolidated-issue.technical { border-left: 4px solid #f59e0b; }
 .consolidated-issue > div { display: flex; justify-content: space-between; gap: 12px; }.consolidated-issue span { color: #fca5a5; font-size: 11px; font-weight: 800; text-transform: uppercase; }.consolidated-issue p,.consolidated-recommendations p { color: var(--text-secondary); line-height: 1.55; }

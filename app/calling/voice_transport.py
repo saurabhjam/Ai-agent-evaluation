@@ -103,6 +103,14 @@ class VoiceTransport:
         """Return whether the most recently received utterance was finalized."""
         return True
 
+    def last_receive_timing(self) -> dict[str, Any]:
+        """Provider-neutral timing metadata for the latest completed utterance."""
+        return {}
+
+    def last_send_timing(self) -> dict[str, Any]:
+        """Provider-neutral timing metadata for the latest outbound utterance."""
+        return {}
+
 
 class UnconfiguredVoiceTransport(VoiceTransport):
     """Explicit failure transport used when no real EvalForge transport is configured."""
@@ -264,6 +272,8 @@ class VapiVoiceTransport(VoiceTransport):
         self._received_audio_chunks = 0
         self._last_outgoing_audio_metadata: dict[str, Any] = {}
         self._last_received_utterance_complete = False
+        self._last_receive_timing: dict[str, Any] = {}
+        self._last_send_timing: dict[str, Any] = {}
         if provider is not None:
             self.provider = provider
         else:
@@ -325,6 +335,9 @@ class VapiVoiceTransport(VoiceTransport):
         logger.info("WebSocket connected connected=%s", _websocket_connected(self.websocket))
 
     def send_audio(self, audio_bytes: bytes, turn_index: int = 0) -> None:
+        send_started = time.perf_counter()
+        first_frame_at = None
+        final_frame_at = None
         if self.websocket is None:
             logger.error("Cannot send Vapi audio: websocket not connected")
             raise VoiceTransportError("Vapi websocket is not connected.")
@@ -363,8 +376,17 @@ class VapiVoiceTransport(VoiceTransport):
                     )
                     break
                 self.websocket.send(frame, opcode=_binary_opcode())
+                final_frame_at = time.perf_counter()
+                if first_frame_at is None:
+                    first_frame_at = final_frame_at
                 self._record_audio("local", frame)
                 time.sleep(self._frame_duration_seconds())
+            self._last_send_timing = {
+                "first_frame_sent_s": first_frame_at,
+                "final_frame_sent_s": final_frame_at,
+                "first_frame_delay_ms": ((first_frame_at - send_started) * 1000) if first_frame_at else None,
+                "transport_ms": (time.perf_counter() - send_started) * 1000,
+            }
         except Exception as exc:
             logger.exception(
                 "Vapi websocket send_audio failed close_status_code=%s close_reason=%s",
@@ -380,6 +402,7 @@ class VapiVoiceTransport(VoiceTransport):
         logger.info("Waiting for Vapi audio timeout_seconds=%s", timeout_seconds)
         self._last_received_utterance_complete = False
         deadline = time.monotonic() + timeout_seconds
+        self._last_receive_timing = {}
         audio_chunks: list[bytes] = []
         utterance_started = False
         utterance_completed = False
@@ -389,6 +412,7 @@ class VapiVoiceTransport(VoiceTransport):
         silence_threshold_rms = float(self.config.settings.get("silence_threshold_rms") or 60.0)
         sample_rate = self._sample_rate()
         bytes_per_second = sample_rate * 2  # 16-bit mono PCM
+        meaningful_audio_ended_at = None
 
         while time.monotonic() < deadline:
             _set_timeout(self.websocket, max(deadline - time.monotonic(), 0.1))
@@ -425,6 +449,9 @@ class VapiVoiceTransport(VoiceTransport):
                 frame_rms = _frame_rms(message)
                 frame_duration = len(message) / bytes_per_second if bytes_per_second > 0 else 0.05
                 is_silence = frame_rms < silence_threshold_rms
+                if not is_silence:
+                    meaningful_audio_ended_at = time.perf_counter()
+                    self._last_receive_timing["meaningful_audio_end_s"] = meaningful_audio_ended_at
 
                 if not is_silence or utterance_started:
                     has_speech = True
@@ -443,6 +470,7 @@ class VapiVoiceTransport(VoiceTransport):
                                 utterance_completed,
                             )
                             self._last_received_utterance_complete = True
+                            self._set_receive_timing(meaningful_audio_ended_at, audio_chunks, bytes_per_second)
                             return self._incoming_audio(b"".join(audio_chunks))
                     else:
                         # Bounded leading silence (max ~0.5s) to avoid buffering dead air before speech
@@ -458,6 +486,7 @@ class VapiVoiceTransport(VoiceTransport):
                     utterance_started = True
                     has_speech = True
                 if self._is_assistant_utterance_completed(control_message):
+                    self._last_receive_timing["provider_speech_stop_s"] = time.perf_counter()
                     utterance_completed = True
                     if audio_chunks:
                         logger.info(
@@ -467,6 +496,7 @@ class VapiVoiceTransport(VoiceTransport):
                             utterance_started,
                         )
                         self._last_received_utterance_complete = True
+                        self._set_receive_timing(meaningful_audio_ended_at, audio_chunks, bytes_per_second)
                         return self._incoming_audio(b"".join(audio_chunks))
 
         logger.error("Timed out waiting for Vapi websocket audio")
@@ -481,6 +511,20 @@ class VapiVoiceTransport(VoiceTransport):
 
     def last_utterance_complete(self) -> bool:
         return self._last_received_utterance_complete
+
+    def _set_receive_timing(self, meaningful_end: float | None, chunks: list[bytes], bytes_per_second: int) -> None:
+        returned_at = time.perf_counter()
+        self._last_receive_timing.update({
+            "receive_return_s": returned_at,
+            "turn_end_detection_ms": ((returned_at - meaningful_end) * 1000) if meaningful_end else None,
+            "agent_audio_duration_ms": (sum(map(len, chunks)) / bytes_per_second * 1000) if bytes_per_second else None,
+        })
+
+    def last_receive_timing(self) -> dict[str, Any]:
+        return dict(self._last_receive_timing)
+
+    def last_send_timing(self) -> dict[str, Any]:
+        return dict(self._last_send_timing)
 
     def hang_up(self, session: VoiceTransportSession) -> None:
         if self.websocket is None:

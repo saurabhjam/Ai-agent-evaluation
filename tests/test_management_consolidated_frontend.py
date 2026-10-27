@@ -29,6 +29,7 @@ def test_report_renders_backend_model_in_required_section_order():
     assert "critical_failures" in source
     assert "historical_comparison" in source
     assert "individual_reports" in source
+    assert "scenario_failures" in source
 
 
 def test_filters_and_all_download_formats_share_selection():
@@ -105,3 +106,14 @@ def test_executive_summary_prioritizes_score_and_period_without_changing_fields(
     assert '"Selected Evaluation Period",periodText,"period"' in executive
     assert ".consolidated-executive-grid .consolidated-stat.primary" in STYLES
     assert ".consolidated-executive-grid .consolidated-stat.period" in STYLES
+
+
+def test_scenario_failures_render_normalized_facts_and_reuse_report_buttons():
+    source = _between("  _consolidatedScenarioFailures", "  _consolidatedIssues")
+    for field in ("scenario.scenario_id", "run.evaluation_id", "run.overall_score", "run.failed_metrics", "metric.reason", "metric.evidence", "metric.recommendations"):
+        assert field in source
+    assert "consolidated-individual-report" in source
+    assert "escAttr(run.evaluation_id)" in source
+    assert "escHtml(metric.reason)" in source
+    assert "No failed test scenarios were found for the selected report scope." in source
+    assert ".consolidated-failed-run code { overflow-wrap: anywhere; white-space: normal; }" in STYLES

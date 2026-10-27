@@ -1,0 +1,9 @@
+workflow_id: property_maintenance
+name: Property Maintenance
+description: Evaluate maintenance reporting, required-information handling, clarification, and controlled changes without assuming unsupported submission capabilities.
+coverage:
+  positive: 3
+  negative: 3
+  edge: 2
+agent_keys:
+  - chatbot:34bb6e09-fe95-4595-9b02-8633638c6948

@@ -29,6 +29,8 @@ import os
 import time
 import uuid
 import wave
+import threading
+import audioop
 import struct
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -95,8 +97,19 @@ def _inspect_audio_bytes(audio_bytes: bytes, *, fallback_sample_rate: int = _DEF
                     "channels": wf.getnchannels(),
                     "bits_per_sample": sample_width * 8,
                     "container": "wav",
+                    "pcm_samples": frames,
+                    "pcm_bytes": frames * sample_width * wf.getnchannels(),
                 }
             )
+            silence_frames = 0
+            block_frames = max(sample_rate // 50, 1)
+            while True:
+                block = wf.readframes(block_frames)
+                if not block:
+                    break
+                if audioop.rms(block, sample_width) < 60:
+                    silence_frames += len(block) // (sample_width * wf.getnchannels())
+            info["rms_below_60_seconds"] = silence_frames / sample_rate if sample_rate else None
             return info
     except (wave.Error, EOFError):
         pass
@@ -166,6 +179,7 @@ class SpeechToTextProvider(ABC):
 # ===========================================================================
 
 _WHISPER_MODEL_CACHE: dict[tuple[Any, ...], Any] = {}
+_WHISPER_MODEL_CACHE_LOCK = threading.Lock()
 
 
 class FasterWhisperSTT(SpeechToTextProvider):
@@ -199,12 +213,13 @@ class FasterWhisperSTT(SpeechToTextProvider):
 
     def _get_model(self):
         cache_key = (self.model_size, self.device, self.compute_type, self.cpu_threads)
-        if cache_key in _WHISPER_MODEL_CACHE:
-            logger.info("FasterWhisperSTT reusing cached Whisper model key=%s", cache_key)
-            self._model = _WHISPER_MODEL_CACHE[cache_key]
-            return self._model
-
-        if self._model is None:
+        with _WHISPER_MODEL_CACHE_LOCK:
+            if cache_key in _WHISPER_MODEL_CACHE:
+                logger.info("FasterWhisperSTT reusing cached Whisper model key=%s", cache_key)
+                self._model = _WHISPER_MODEL_CACHE[cache_key]
+                return self._model
+            if self._model is not None:
+                return self._model
             logger.info(
                 "FasterWhisperSTT creating Whisper model name=%s device=%s compute_type=%s cpu_threads=%s",
                 self.model_size,
@@ -226,12 +241,11 @@ class FasterWhisperSTT(SpeechToTextProvider):
                 cpu_threads=self.cpu_threads,
             )
             _WHISPER_MODEL_CACHE[cache_key] = self._model
-        else:
-            logger.info("FasterWhisperSTT reusing Whisper model name=%s", self.model_size)
         return self._model
 
     def transcribe(self, audio_bytes: bytes, sample_rate: int = 16_000) -> str:
         """Transcribe WAV bytes using faster-whisper."""
+        started = time.perf_counter()
         info = _inspect_audio_bytes(audio_bytes, fallback_sample_rate=sample_rate)
         logger.info(
             "LocalSTTProvider.transcribe audio bytes=%d wav_duration_seconds=%s sample_rate=%s channels=%s bits_per_sample=%s whisper_model=%s model_reused=%s",
@@ -250,14 +264,33 @@ class FasterWhisperSTT(SpeechToTextProvider):
                 f"{duration:.2f}s exceeds {self.max_audio_duration_seconds:.2f}s. "
                 "Reduce receive timeout or split audio before transcription."
             )
+        acquisition_started = time.perf_counter()
         model = self._get_model()
-        audio_file = io.BytesIO(audio_bytes)
+        acquired = time.perf_counter()
+        # Use the same decoder as Whisper so resampling and channel conversion remain identical.
+        from faster_whisper.audio import decode_audio
+        audio = decode_audio(io.BytesIO(audio_bytes))
+        decoded = time.perf_counter()
         segments, _ = model.transcribe(
-            audio_file,
+            audio,
             language=self.language,
             beam_size=self.beam_size,
         )
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        invoked = time.perf_counter()
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        finished = time.perf_counter()
+        self.last_transcription_timing = {
+            "input": info,
+            "model_acquisition_ms": (acquired - acquisition_started) * 1000,
+            "preprocessing_ms": (decoded - acquired) * 1000,
+            "invocation_ms": (invoked - decoded) * 1000,
+            "segment_materialization_ms": (finished - invoked) * 1000,
+            "total_ms": (finished - started) * 1000,
+            "rtf": (finished - started) / duration if duration else None,
+            "language_hint": self.language,
+            "cpu_threads": self.cpu_threads,
+        }
+        return text
 
 
 # ===========================================================================
@@ -307,6 +340,10 @@ class TextToSpeechProvider(ABC):
 # ===========================================================================
 # Concrete TTS: PiperTTS
 # ===========================================================================
+
+_PIPER_MODEL_CACHE: dict[str, Any] = {}
+_PIPER_MODEL_CACHE_LOCK = threading.Lock()
+
 
 class PiperTTS(TextToSpeechProvider):
     """
@@ -363,7 +400,12 @@ class PiperTTS(TextToSpeechProvider):
                 "Please download a voice model (e.g. en_US-lessac-medium.onnx and .json) "
                 "from https://huggingface.co/rhasspy/piper-voices and place it in the models/ directory."
             )
-        self._piper_model = PiperVoice.load(self.model_path)
+        cache_key = os.path.abspath(self.model_path)
+        with _PIPER_MODEL_CACHE_LOCK:
+            self._piper_model = _PIPER_MODEL_CACHE.get(cache_key)
+            if self._piper_model is None:
+                self._piper_model = PiperVoice.load(self.model_path)
+                _PIPER_MODEL_CACHE[cache_key] = self._piper_model
         return self._piper_model
 
     def synthesize(self, text: str) -> bytes:

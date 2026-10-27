@@ -16,6 +16,7 @@ from app.backend_validation import BackendValidationEngine, BackendValidationSum
 from app.failure_analysis import FailureAnalysisEngine, failure_analysis_engine
 from app.models.conversation import RAGEvidence
 from app.models.failure_analysis import FailureAnalysis
+from app.workflow_models import ScenarioMetadata
 from app.evaluation_evidence import TechnicalErrorEvidence, classify_technical_errors
 
 class ConversationTurn(BaseModel):
@@ -54,6 +55,7 @@ class EvaluationResult(BaseModel):
     agent_type: str
     adapter: str
     scenario_id: str
+    scenario_metadata: Optional[ScenarioMetadata] = None
     session_id: Optional[str] = None
     overall_score: float = 0.0
     passed: bool = False

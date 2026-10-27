@@ -17,8 +17,14 @@ from app.management.consolidated_models import (
     ReportSelection,
     ScenarioCoverage,
     ScenarioResult,
+    ScenarioFailure,
+    ScenarioFailedEvaluation,
+    ScenarioFailedMetric,
+    OutcomeDistribution,
+    OutcomeSlice,
 )
 from app.management.service import ManagementAggregationService, _outcome, _score, _timestamp
+from app.scenario_metadata import persisted_metadata
 
 
 SECTION_TITLES = [
@@ -26,7 +32,7 @@ SECTION_TITLES = [
     "2. Evaluation Coverage and Run Information",
     "3. 10 Evaluation Metrics — Consolidated Scores",
     "4. Scenario-wise Results and Report Links",
-    "5. Critical Failures and Evidence",
+    "5. Test Scenario-wise Failures and Evidence",
     "6. Recommendations and Improvement Priorities",
     "7. Historical Performance Comparison",
     "8. Individual Report References",
@@ -83,10 +89,13 @@ class ConsolidatedReportEngine:
         status: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        workflow_id: str | None = None,
+        test_case_type: str | None = None,
     ) -> ConsolidatedReport:
         agent = self._service.get_agent(agent_key)
         reports = self._service.select_reports(
-            agent_key, scenario_id=scenario_id, status=status, date_from=date_from, date_to=date_to
+            agent_key, scenario_id=scenario_id, status=status, date_from=date_from, date_to=date_to,
+            workflow_id=workflow_id, test_case_type=test_case_type,
         )
         metrics = _metrics(reports)
         scenarios = _scenario_results(reports)
@@ -104,6 +113,7 @@ class ConsolidatedReportEngine:
         coverage = _coverage(reports, scenarios, metrics, timestamps, agent.comparability_warnings)
         references = [_reference(report) for report in reports]
         return ConsolidatedReport(
+            **self._service.workflow_data(agent_key, reports, workflow_id=workflow_id),
             generated_at=datetime.now(timezone.utc).isoformat(),
             agent_key=agent.agent_key,
             agent_name=agent.name,
@@ -111,6 +121,7 @@ class ConsolidatedReportEngine:
             provider=agent.provider,
             adapter=agent.adapter,
             selection=ReportSelection(
+                workflow_id=workflow_id, test_case_type=test_case_type,
                 scenario_id=scenario_id,
                 status=status,
                 date_from=date_from.isoformat() if date_from else None,
@@ -134,13 +145,29 @@ class ConsolidatedReportEngine:
                 "technical_reliability": f"{counts['error']} of {len(reports)} selected runs encountered a technical error.",
             },
             evaluation_coverage=coverage,
+            outcome_distribution=_outcome_distribution(coverage["outcome_distribution"]),
             consolidated_metrics=metrics,
             scenario_results=scenarios,
             critical_failures=failures,
+            scenario_failures=_scenario_failures(reports),
             recommendations=recommendations,
             historical_comparison=_historical_comparison(reports),
             individual_reports=references,
         )
+
+
+def _outcome_distribution(counts: dict[str, int]) -> OutcomeDistribution:
+    """Presentation only: reuse coverage counts and the UI's semantic palette."""
+    total = sum(counts[key] for key in ("pass", "fail", "error"))
+    return OutcomeDistribution(
+        represented_total=total,
+        unknown_count=counts["unknown"],
+        slices=[OutcomeSlice(
+            outcome=key.upper(), count=counts[key],
+            percentage=counts[key] * 100 / total if total else 0,
+            color=color,
+        ) for key, color in (("pass", "#22c55e"), ("fail", "#ef4444"), ("error", "#f59e0b"))],
+    )
 
 
 def _metrics(reports: list[dict[str, Any]]) -> list[ConsolidatedMetric]:
@@ -222,6 +249,61 @@ def _scenario_results(reports: list[dict[str, Any]]) -> list[ScenarioResult]:
             report_url=f"/evaluations/{evaluation_id}/report" if evaluation_id else None,
         ))
     return results
+
+
+def _scenario_failures(reports: list[dict[str, Any]]) -> list[ScenarioFailure]:
+    """Project selected persisted FAIL runs, without re-scoring or generating findings."""
+    grouped: dict[str, list[ScenarioFailedEvaluation]] = defaultdict(list)
+    seen: set[str] = set()
+    excluded_states = {"not_evaluated", "skipped", "insufficient_evidence", "unverified", "error", "technical_error"}
+    for report in reports:
+        if _outcome(report) != "fail":
+            continue
+        evaluation_id = str(report.get("evaluation_id") or "")
+        if evaluation_id in seen:
+            continue
+        seen.add(evaluation_id)
+        # Match consolidation's last canonical metric record, including aliases.
+        metrics = {_canonical_metric(m.get("name")): m for m in report.get("metrics") or [] if isinstance(m, dict)}
+        analyses = [a for a in report.get("failure_analysis") or [] if isinstance(a, dict)]
+        failed = []
+        evaluated_count = 0
+        for name in METRIC_NAMES:
+            metric = metrics.get(name)
+            if not metric:
+                continue
+            state = str(metric.get("evaluation_status") or metric.get("status") or "").strip().lower().replace(" ", "_")
+            if state in excluded_states or _number(metric.get("score")) is None:
+                continue
+            evaluated_count += 1
+            if metric.get("passed") is not False:
+                continue
+            related = [a for a in analyses if _canonical_metric(a.get("metric_name")) == name]
+            evidence = _presentation_values([metric.get("evidence")] + [a.get("evidence") for a in related])
+            summaries = _presentation_values([a.get("failure_summary") or a.get("reason") for a in related])
+            recommendations = _presentation_values([a.get("recommendation") for a in related])
+            failed.append(ScenarioFailedMetric(
+                name=name, score=_number(metric.get("score")), reason=_safe_text(metric.get("reason")),
+                evidence=evidence, failure_summaries=summaries, recommendations=recommendations,
+            ))
+        grouped[str(report.get("scenario_id") or "Unknown")].append(ScenarioFailedEvaluation(
+            scenario_metadata=persisted_metadata(report),
+            evaluation_id=evaluation_id, overall_score=_score(report),
+            report_url=f"/evaluations/{evaluation_id}/report",
+            summary=f"{len(failed)} of {evaluated_count} evaluated metrics failed.", failed_metrics=failed,
+        ))
+    return [ScenarioFailure(scenario_id=name, evaluations=items) for name, items in sorted(grouped.items())]
+
+
+def _presentation_values(values: list[Any]) -> list[str]:
+    """Concise, redacted, deduplicated copies; never substitute reasons for evidence."""
+    result = []
+    for value in values:
+        for item in value if isinstance(value, list) else [value]:
+            text = _safe_text(item)
+            if text and text not in result:
+                result.append(text)
+    return result[:5]
 
 
 def _issues(reports: list[dict[str, Any]]) -> list[ConsolidatedIssue]:
@@ -324,6 +406,7 @@ def _reference(report: dict[str, Any]) -> ConsolidatedEvaluationReference:
     outcome = _outcome(report)
     timestamp = _timestamp(report)
     return ConsolidatedEvaluationReference(
+        scenario_metadata=persisted_metadata(report),
         scenario_id=str(report.get("scenario_id") or "Unknown"),
         evaluation_id=evaluation_id,
         timestamp=timestamp.isoformat() if timestamp else None,
@@ -348,7 +431,7 @@ def _history_reasons(reports: list[dict[str, Any]]) -> list[str]:
         reasons.append("Only one qualifying evaluation run is available.")
     if not reports or any(not report.get("evaluation_config_hash") for report in reports):
         reasons.append("Evaluator configuration provenance is unavailable for one or more runs.")
-    if not reports or any(not report.get("scenario_version") and not report.get("scenario_hash") for report in reports):
+    if not reports or any(not report.get("scenario_version") and not report.get("scenario_hash") and not persisted_metadata(report).scenario_hash for report in reports):
         reasons.append("Scenario version provenance is unavailable for one or more runs.")
     return reasons or ["No comparable period or batch identifiers are persisted."]
 
