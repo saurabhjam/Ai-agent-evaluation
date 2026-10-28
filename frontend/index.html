@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EvalForge — AI Agent Evaluation Platform</title>
+<meta name="description" content="Professional AI Agent Evaluation Dashboard for testing chatbot and voice agents using DeepEval metrics. Connect agents, run evaluations, and inspect results.">
+<meta name="theme-color" content="#090e1a">
+<link rel="stylesheet" href="/static/styles.css">
+
+    <style>
+      .log-entry { margin-bottom: 2px; }
+      .log-time { color: #888; }
+      .log-level { font-weight: bold; margin-right: 8px; }
+      .log-info .log-level { color: #3b82f6; }
+      .log-warning .log-level { color: #f59e0b; }
+      .log-error .log-level { color: #ef4444; }
+      .log-debug .log-level { color: #8b5cf6; }
+    </style>
+    </head>
+<body>
+<div id="app">
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       SIDEBAR
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      </div>
+      <div class="sidebar-logo-text">
+        <span class="name">EvalForge</span>
+        <span class="tag">AI Evaluation Platform</span>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Platform</div>
+
+      <div class="nav-item active" data-page="dashboard" id="nav-dashboard" role="button" tabindex="0" aria-label="Dashboard">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+        <span>Dashboard</span>
+      </div>
+
+      <div class="nav-item" data-page="connections" id="nav-connections" role="button" tabindex="0" aria-label="Connections">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        <span>Connections</span>
+      </div>
+
+      <div class="nav-item" data-page="calling" id="nav-calling" role="button" tabindex="0" aria-label="AI Calling">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.95.68l1.12 3.36a1 1 0 01-.5 1.2l-2.2 1.1a11.04 11.04 0 005.01 5.01l1.1-2.2a1 1 0 011.2-.5l3.36 1.12a1 1 0 01.68.95V19a2 2 0 01-2 2h-1C9.16 21 3 14.84 3 7V5z"/>
+        </svg>
+        <span>AI Calling</span>
+      </div>
+
+      <div class="nav-item" data-page="evaluations" id="nav-evaluations" role="button" tabindex="0" aria-label="Evaluations">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+        </svg>
+        <span>Evaluations</span>
+      </div>
+
+      <div class="nav-item" data-page="scenarios" id="nav-scenarios" role="button" tabindex="0" aria-label="Scenarios">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <span>Scenarios</span>
+      </div>
+
+      <div class="nav-section-label">System</div>
+
+      <div class="nav-item" data-page="settings" id="nav-settings" role="button" tabindex="0" aria-label="Settings">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span>Settings</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-backend-status" id="backend-status-bar" aria-live="polite">
+        <div class="status-dot" id="backend-dot" aria-hidden="true"></div>
+        <span id="backend-status-text">Connecting…</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       MAIN CONTENT AREA
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+  <div class="main-area">
+    <!-- Top bar / breadcrumb -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb" aria-label="Breadcrumb">
+        <span>EvalForge</span>
+        <span class="sep">›</span>
+        <span class="current" id="breadcrumb-current">Dashboard</span>
+      </div>
+      <div id="topbar-actions"></div>
+    </div>
+
+    <!-- Scrollable content -->
+    <div class="content-area" id="content-area" role="main">
+
+      <!-- ══════════════════════════════════════════
+           DASHBOARD PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page active" id="page-dashboard" aria-label="Dashboard">
+        <div class="section-header management-dashboard-header">
+          <div>
+            <div class="section-title">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7"/>
+              </svg>
+              Management Dashboard
+            </div>
+            <div class="management-dashboard-subtitle">Post-baseline evaluation performance across all evaluated agents.</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="App.loadDashboard()" aria-label="Refresh management dashboard">
+            Refresh
+          </button>
+        </div>
+        <div class="stats-grid" id="dashboard-stats">
+          <div class="stat-card blue">
+            <div class="stat-card-icon blue" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+            </div>
+            <div class="stat-card-value" id="stat-management-agents">—</div>
+            <div class="stat-card-label">Evaluated Agents</div>
+          </div>
+          <div class="stat-card purple">
+            <div class="stat-card-icon purple" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+            </div>
+            <div class="stat-card-value" id="stat-management-runs">—</div>
+            <div class="stat-card-label">Total Evaluation Runs</div>
+          </div>
+          <div class="stat-card blue">
+            <div class="stat-card-icon blue" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </div>
+            <div class="stat-card-value" id="stat-management-scenarios">—</div>
+            <div class="stat-card-label">Unique Scenarios</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-card-icon green" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div class="stat-card-value" id="stat-management-passed">—</div>
+            <div class="stat-card-label">Passed</div>
+          </div>
+          <div class="stat-card red">
+            <div class="stat-card-icon red" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div class="stat-card-value" id="stat-management-failed">—</div>
+            <div class="stat-card-label">Failed</div>
+          </div>
+          <div class="stat-card warning">
+            <div class="stat-card-icon warning" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+            <div class="stat-card-value" id="stat-management-errors">—</div>
+            <div class="stat-card-label">Technical Errors</div>
+          </div>
+        </div>
+
+        <div class="management-filter-bar" aria-label="Management agent filters">
+          <div class="management-search-wrap">
+            <label class="form-label" for="management-search">Search agents</label>
+            <input class="form-input" id="management-search" type="search" placeholder="Agent name" autocomplete="off">
+          </div>
+          <div>
+            <label class="form-label" for="management-agent-type">Agent type</label>
+            <select class="form-input" id="management-agent-type">
+              <option value="">All types</option>
+              <option value="chatbot">Chatbot</option>
+              <option value="voice">Voice</option>
+              <option value="calling">AI Calling</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" for="management-provider">Provider / adapter</label>
+            <input class="form-input" id="management-provider" type="search" placeholder="e.g. REST, Vapi" autocomplete="off">
+          </div>
+          <div class="management-filter-actions">
+            <button class="btn btn-primary btn-sm" onclick="App.applyManagementFilters()">Apply</button>
+            <button class="btn btn-secondary btn-sm" onclick="App.clearManagementFilters()">Clear</button>
+          </div>
+        </div>
+
+        <div class="card management-agents-card">
+          <div class="card-header">
+            <span class="card-title">Evaluated Agents</span>
+            <span class="management-result-count" id="management-result-count"></span>
+          </div>
+          <div id="management-agents-content" class="table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           CONNECTIONS PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-connections" aria-label="Connections">
+        <div class="section-header">
+          <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            Agent Connections
+          </div>
+          <button class="btn btn-primary" id="btn-add-connection" onclick="App.openAddConnectionModal()" aria-label="Add new connection">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            Add Connection
+          </button>
+        </div>
+        <div class="card">
+          <div id="connections-table" class="table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           AI CALLING PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-calling" aria-label="AI Calling Agent Evaluation">
+        <div class="section-header">
+          <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.95.68l1.12 3.36a1 1 0 01-.5 1.2l-2.2 1.1a11.04 11.04 0 005.01 5.01l1.1-2.2a1 1 0 011.2-.5l3.36 1.12a1 1 0 01.68.95V19a2 2 0 01-2 2h-1C9.16 21 3 14.84 3 7V5z"/>
+            </svg>
+            AI Calling Agent Evaluation
+          </div>
+          <button class="btn btn-primary" id="btn-add-calling" onclick="App.openCallingModal()" aria-label="Add AI calling connection">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            Add Calling Connection
+          </button>
+        </div>
+        <div class="calling-layout">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Calling Connections</span>
+              <button class="btn btn-secondary btn-sm" onclick="App.loadCallingConnections()">Refresh</button>
+            </div>
+            <div id="calling-connections-table" class="table-wrapper"></div>
+          </div>
+          <div class="calling-side">
+            <div class="card card-body">
+              <div class="settings-section-title">Evaluation Status</div>
+              <div id="calling-status-panel" class="calling-status-panel"></div>
+            </div>
+            <div class="card card-body">
+              <div class="settings-section-title">Transcript</div>
+              <div id="calling-transcript-panel" class="calling-detail-panel"></div>
+            </div>
+            <div class="card card-body">
+              <div class="settings-section-title">Recording Metadata</div>
+              <div id="calling-recording-panel" class="calling-detail-panel"></div>
+            </div>
+            <div class="card card-body">
+              <div class="settings-section-title">Evaluation Report</div>
+              <div id="calling-report-panel" class="calling-detail-panel"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           EVALUATIONS PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-evaluations" aria-label="All Evaluations">
+        <div class="section-header">
+          <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+            </svg>
+            All Evaluations
+          </div>
+        </div>
+        <div class="card">
+          <div id="all-evals-table" class="table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           SCENARIOS PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-scenarios" aria-label="Scenario Library">
+        <div class="section-header">
+          <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Scenario Library
+          </div>
+          <button class="btn btn-primary" id="btn-add-scenario" onclick="App.openPasteScenarioModal()" aria-label="Paste new scenario">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            Paste Scenario
+          </button>
+        </div>
+        <div class="card">
+          <div id="scenarios-table" class="table-wrapper"></div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           SETTINGS PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-settings" aria-label="Settings">
+        <div class="section-header">
+          <div class="section-title">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            Settings
+          </div>
+        </div>
+
+        <div class="card card-body">
+          <div class="settings-section">
+            <div class="settings-section-title">Backend Configuration</div>
+            <div class="form-group">
+              <label class="form-label" for="setting-api-url">Backend API URL</label>
+              <input class="form-input" id="setting-api-url" value="" placeholder="e.g. http://127.0.0.1:8001" type="url" aria-describedby="api-url-hint">
+              <div class="form-hint" id="api-url-hint">The base URL of the FastAPI backend. Change this if you are running on a different host or port.</div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="App.saveSettings()" id="btn-save-settings">Save Settings</button>
+              <button class="btn btn-secondary" onclick="App.testBackend()" id="btn-test-backend">Test Connection</button>
+            </div>
+            <div id="settings-msg" style="margin-top:16px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           EVAL DETAILS PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-eval-details" aria-label="Evaluation Details">
+        <div id="eval-details-content"></div>
+      </div>
+
+      <div class="page" id="page-agent-details" aria-label="Agent Details">
+        <div id="agent-details-content"></div>
+      </div>
+
+      <div class="page" id="page-consolidated-report" aria-label="Consolidated Evaluation Report">
+        <div id="consolidated-report-content"></div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           PROFESSIONAL REPORT PAGE
+           ══════════════════════════════════════════ -->
+      <div class="page" id="page-eval-report" aria-label="AI Agent Assessment Report">
+        <div id="eval-report-content"></div>
+      </div>
+
+    </div><!-- /content-area -->
+  </div><!-- /main-area -->
+</div><!-- /#app -->
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     AI CALLING CONNECTION MODAL
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-calling-connection" role="dialog" aria-modal="true" aria-labelledby="modal-calling-title">
+  <div class="modal" style="max-width: 720px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-calling-title">Add Calling Connection</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeModal('modal-calling-connection')" aria-label="Close modal">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-calling-alert"></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="calling-name">Connection Name <span class="required">*</span></label>
+          <input class="form-input" id="calling-name" placeholder="e.g. Acme Twilio Agent" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="calling-provider">Provider <span class="required">*</span></label>
+          <select class="form-select" id="calling-provider" onchange="App.onCallingProviderChange()">
+            <option value="mock">Mock</option>
+            <option value="vapi">Vapi</option>
+            <option value="twilio">Twilio</option>
+            <option value="retell">Retell</option>
+            <option value="bland">Bland</option>
+            <option value="sip">SIP</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+      </div>
+      <div id="calling-provider-form"></div>
+      <div class="form-group">
+        <label class="form-label" for="calling-timeout">Default Timeout Seconds</label>
+        <input class="form-input" id="calling-timeout" type="number" min="1" step="1" value="120">
+        <div class="form-hint">Used as a provider/runtime default. Destination and caller details are selected when an evaluation is run.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="calling-options">Additional Provider Settings (JSON)</label>
+        <textarea class="form-textarea" id="calling-options" placeholder='{"recording_enabled": true}'></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-test-calling" onclick="App.testCallingDraft()">Test Connection</button>
+      <button class="btn btn-primary" id="btn-save-calling" onclick="App.saveCallingConnection()">Save Connection</button>
+    </div>
+  </div>
+</div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     RUN CALLING EVALUATION MODAL
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-calling-run" role="dialog" aria-modal="true" aria-labelledby="modal-calling-run-title">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-calling-run-title">Run Calling Evaluation</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeModal('modal-calling-run')" aria-label="Close modal">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-calling-run-alert"></div>
+      <div class="agent-info-box">
+        <div class="label">Selected Calling Agent</div>
+        <div class="name" id="calling-run-agent-info">—</div>
+        <div class="meta" id="calling-run-agent-meta">—</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="calling-run-scenario-select">Scenario <span class="required">*</span></label>
+        <select class="form-select" id="calling-run-scenario-select">
+          <option value="">Loading scenarios…</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="calling-run-mode">Evaluation Mode <span class="required">*</span></label>
+        <select class="form-select" id="calling-run-mode" onchange="App.onCallingRunModeChange()">
+          <option value="outbound">Outbound</option>
+          <option value="inbound">Inbound</option>
+        </select>
+      </div>
+      <div id="calling-run-custom-path-group" style="display:none" class="form-group">
+        <label class="form-label" for="calling-run-custom-path">Custom Scenario Path</label>
+        <input class="form-input" id="calling-run-custom-path" placeholder="scenarios/calling/my_scenario.yaml" autocomplete="off">
+      </div>
+      <div class="form-row" id="calling-run-outbound-fields">
+        <div class="form-group">
+          <label class="form-label" for="calling-run-to">Destination Number</label>
+          <input class="form-input" id="calling-run-to" placeholder="+15550000002" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="calling-run-from">From Number</label>
+          <input class="form-input" id="calling-run-from" placeholder="+15550000001" autocomplete="off">
+        </div>
+      </div>
+      <div class="form-group" id="calling-run-inbound-fields" style="display:none">
+        <label class="form-label" for="calling-run-expected-caller">Expected Caller ID</label>
+        <input class="form-input" id="calling-run-expected-caller" placeholder="+15551234567" autocomplete="off">
+        <div class="form-hint">Optional. EvalForge will enter a waiting-for-call state for this inbound run.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="App.closeModal('modal-calling-run')">Cancel</button>
+      <button class="btn btn-primary" id="btn-run-calling" onclick="App.runCallingEvaluation()">Run Evaluation</button>
+    </div>
+  </div>
+</div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     ADD CONNECTION MODAL
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-add-connection" role="dialog" aria-modal="true" aria-labelledby="modal-conn-title">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-conn-title">Add Connection</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeModal('modal-add-connection')" aria-label="Close modal">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-conn-alert"></div>
+
+      <div class="form-group">
+        <label class="form-label" for="conn-name">Agent Name <span class="required">*</span></label>
+        <input class="form-input" id="conn-name" placeholder="e.g. Acme Support Bot" autocomplete="off">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="conn-type">Agent Type <span class="required">*</span></label>
+          <select class="form-select" id="conn-type" onchange="App.onConnTypeChange()">
+            <option value="chatbot">Chatbot</option>
+            <option value="voice">Voice Agent</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="conn-method">Connection Method <span class="required">*</span></label>
+          <select class="form-select" id="conn-method" onchange="App.onConnMethodChange()">
+            <option value="rest">REST API</option>
+            <option value="websocket">WebSocket</option>
+            <option value="browser">Browser (Playwright)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" id="conn-url-group">
+        <label class="form-label" for="conn-url">URL <span class="required">*</span></label>
+        <input class="form-input" id="conn-url" placeholder="https://api.example.com/chat" type="url" autocomplete="off">
+        <div class="form-hint">Primary endpoint URL for the agent connection.</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="conn-auth-type">Authentication</label>
+          <select class="form-select" id="conn-auth-type" onchange="App.onAuthTypeChange()">
+            <option value="">None</option>
+            <option value="api_key">API Key</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="basic">Basic Auth</option>
+            <option value="browser_token">Browser Token (Playwright)</option>
+          </select>
+        </div>
+        <div class="form-group" id="conn-auth-value-group" style="display:none">
+          <label class="form-label" for="conn-auth-value" id="conn-auth-value-label">Auth Value</label>
+          <input class="form-input" id="conn-auth-value" type="password" placeholder="Your credential (never logged)" autocomplete="new-password">
+          <div class="form-hint">Use <code>env:MY_KEY</code> to reference environment variables.</div>
+        </div>
+      </div>
+
+      <div id="conn-browser-group" style="display:none">
+        <!-- ═══════════════════════════════════════════════════════════════
+             BROWSER AUTHENTICATION SECTION
+             Always visible when Browser (Playwright) is selected.
+             No cookies/tokens are exposed in the frontend.
+        ════════════════════════════════════════════════════════════════ -->
+        <div style="background: var(--surface-raised, #1e2030); border: 1px solid var(--border, #2d3149); border-radius: 8px; padding: 14px 16px; margin-top: 14px;">
+          <h3 style="margin: 0 0 12px 0; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent, #818cf8);">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:5px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            Browser Authentication
+          </h3>
+
+          <!-- Status row -->
+          <div id="conn-browser-auth-status" style="margin-bottom: 10px; font-size: 13px; color: var(--text-secondary, #9ca3af);">
+            Not authenticated. Click <strong>Open Login / Authenticate</strong> to start.
+          </div>
+          
+          <!-- Browser Login URL -->
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label class="form-label" for="conn-browser-login-url" style="color: var(--text, #f3f4f6);">Browser Login URL</label>
+            <input class="form-input" id="conn-browser-login-url" type="url" placeholder="Optional. e.g. https://auth.example.com/login" autocomplete="off">
+            <div class="form-hint" style="color: var(--text-muted, #9ca3af);">URL to open for login. If empty, the main connection URL is used.</div>
+          </div>
+          
+          <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <!-- Authenticated Selector -->
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label" for="conn-browser-auth-selector" style="color: var(--text, #f3f4f6);">Authenticated Selector <span class="required">*</span></label>
+              <input class="form-input" id="conn-browser-auth-selector" type="text" placeholder="e.g. input[aria-label='Ask Sophia']" autocomplete="off">
+              <div class="form-hint" style="color: var(--text-muted, #9ca3af);">Required to verify login.</div>
+            </div>
+            
+            <!-- Expected URL -->
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label" for="conn-browser-auth-url" style="color: var(--text, #f3f4f6);">Expected URL</label>
+              <input class="form-input" id="conn-browser-auth-url" type="text" placeholder="Optional. e.g. */dashboard" autocomplete="off">
+              <div class="form-hint" style="color: var(--text-muted, #9ca3af);">URL pattern after login.</div>
+            </div>
+            
+            <!-- Required Cookie -->
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label" for="conn-browser-auth-cookie" style="color: var(--text, #f3f4f6);">Required Cookie</label>
+              <input class="form-input" id="conn-browser-auth-cookie" type="text" placeholder="Optional. e.g. __session" autocomplete="off">
+              <div class="form-hint" style="color: var(--text-muted, #9ca3af);">Must exist to verify login.</div>
+            </div>
+          </div>
+
+
+          <!-- Action buttons -->
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-secondary btn-sm" id="btn-browser-auth-start" onclick="App.startBrowserAuth()" type="button" aria-label="Launch Browser to Authenticate">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="width:15px;height:15px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              Open Login / Authenticate
+            </button>
+            <button class="btn btn-primary btn-sm" id="btn-browser-auth-save" onclick="App.saveBrowserAuth()" type="button" aria-label="Save Authentication" style="display:none;">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="width:15px;height:15px;"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+              Save Authentication
+            </button>
+          </div>
+
+          <!-- Storage State path (read-only, auto-populated after Save Auth) -->
+          <div class="form-group" id="conn-browser-auth-value-group" style="display:none; margin-top: 12px;">
+            <label class="form-label" for="conn-browser-auth-value" id="conn-browser-auth-value-label">Storage State Path</label>
+            <input class="form-input" id="conn-browser-auth-value" type="text" placeholder="auto-populated after saving" autocomplete="off" readonly
+              style="background: var(--surface, #131625); color: var(--text-muted, #6b7280); cursor: default;">
+            <div class="form-hint" id="conn-browser-auth-hint">Auto-saved path to the Playwright storage state file. No tokens are displayed here.</div>
+          </div>
+
+          <div class="form-hint" style="margin-top: 10px;">
+            This launches a real, visible browser. Log in normally — the session is captured and stored securely by the backend.
+          </div>
+        </div>
+
+        <!-- Hidden select kept for _doSaveConnection() data serialisation -->
+        <select id="conn-browser-auth" style="display:none">
+          <option value="">None</option>
+          <option value="storage_state">Storage State</option>
+        </select>
+
+        <h3 style="margin-top: 15px; margin-bottom: 10px; font-size: 14px; font-weight: 600;">DOM Selectors</h3>
+        <div class="form-group">
+          <label class="form-label" for="conn-selector-input">Input Selector <span class="required">*</span></label>
+          <input class="form-input" id="conn-selector-input" placeholder="#chat-input" autocomplete="off">
+          <div class="form-hint">CSS selector for the chat input field.</div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="conn-selector-submit">Submit Selector</label>
+            <input class="form-input" id="conn-selector-submit" placeholder="#chat-send" autocomplete="off">
+            <div class="form-hint">CSS selector for the send button (optional if using Enter).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="conn-selector-response">Response Selector <span class="required">*</span></label>
+            <input class="form-input" id="conn-selector-response" placeholder=".bot-msg" autocomplete="off">
+            <div class="form-hint">CSS selector for the bot response messages.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="conn-options">Options (JSON)</label>
+        <textarea class="form-textarea" id="conn-options" placeholder='{"agent_name": "assistant"}'></textarea>
+        <div class="form-hint">Optional adapter-specific parameters as a JSON object. Example: <code>{"agent_name": "assistant"}</code> for LiveKit.</div>
+      </div>
+
+      <div class="form-group" id="conn-backend-validation-group">
+        <div class="capability-panel">
+          <div class="settings-section-title">Backend Validation</div>
+          <label class="capability-option">
+            <input type="checkbox" id="conn-backend-validation-enabled" onchange="App.onBackendValidationToggle()">
+            <span>
+              <strong>Enable Backend Validation</strong>
+              <small>Store reusable backend systems for post-evaluation validation. Scenarios reference these by backend ID.</small>
+            </span>
+          </label>
+          <div id="conn-backend-validation-panel" style="display:none">
+            <div class="backend-config-head">
+              <strong>Configured Backend Connections</strong>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="App.showBackendConnectionForm()">+ Add Backend Connection</button>
+            </div>
+            <div id="conn-backend-list" class="backend-config-list"></div>
+            <div id="conn-backend-form" class="backend-config-form" style="display:none">
+              <input type="hidden" id="conn-backend-edit-index" value="">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="conn-backend-name">Backend Name <span class="required">*</span></label>
+                  <input class="form-input" id="conn-backend-name" placeholder="Sophia Backend" autocomplete="off">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="conn-backend-type">Backend Type</label>
+                  <select class="form-select" id="conn-backend-type" onchange="App.onBackendConnectionTypeChange()">
+                    <option value="rest">REST API</option>
+                    <option value="postgresql">PostgreSQL</option>
+                    <option value="mysql">MySQL</option>
+                    <option value="sqlserver">SQL Server</option>
+                    <option value="sqlite">SQLite</option>
+                    <option value="mongodb" disabled>MongoDB (Coming Soon)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="conn-backend-rest-fields">
+                <div class="form-group">
+                  <label class="form-label" for="conn-backend-base-url">Base URL <span class="required">*</span></label>
+                  <input class="form-input" id="conn-backend-base-url" placeholder="https://api.company.com" autocomplete="off">
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-auth-type">Authentication</label>
+                    <select class="form-select" id="conn-backend-auth-type" onchange="App.onBackendAuthTypeChange()">
+                      <option value="">None</option>
+                      <option value="bearer">Bearer Token</option>
+                      <option value="api_key">API Key</option>
+                      <option value="basic">Basic Auth</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-timeout">Timeout</label>
+                    <input class="form-input" id="conn-backend-timeout" type="number" min="1" step="1" placeholder="30">
+                  </div>
+                </div>
+                <div id="conn-backend-auth-bearer" class="form-group" style="display:none">
+                  <label class="form-label" for="conn-backend-token">Token</label>
+                  <input class="form-input" id="conn-backend-token" type="password" autocomplete="new-password">
+                </div>
+                <div id="conn-backend-auth-api-key" class="form-row" style="display:none">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-api-header">Header Name</label>
+                    <input class="form-input" id="conn-backend-api-header" placeholder="X-API-Key" autocomplete="off">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-api-key">API Key</label>
+                    <input class="form-input" id="conn-backend-api-key" type="password" autocomplete="new-password">
+                  </div>
+                </div>
+                <div id="conn-backend-auth-basic" class="form-row" style="display:none">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-basic-user">Username</label>
+                    <input class="form-input" id="conn-backend-basic-user" autocomplete="off">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-basic-password">Password</label>
+                    <input class="form-input" id="conn-backend-basic-password" type="password" autocomplete="new-password">
+                  </div>
+                </div>
+                <label class="capability-option compact">
+                  <input type="checkbox" id="conn-backend-verify-ssl" checked>
+                  <span><strong>Verify SSL</strong><small>Validate TLS certificates for HTTPS requests.</small></span>
+                </label>
+              </div>
+
+              <div id="conn-backend-sql-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-sql-host">Host</label>
+                    <input class="form-input" id="conn-backend-sql-host" placeholder="db.company.com" autocomplete="off">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-sql-port">Port</label>
+                    <input class="form-input" id="conn-backend-sql-port" type="number" min="1" step="1" placeholder="5432">
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-sql-database">Database</label>
+                    <input class="form-input" id="conn-backend-sql-database" autocomplete="off">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-sql-driver">Driver</label>
+                    <input class="form-input" id="conn-backend-sql-driver" placeholder="postgresql" autocomplete="off">
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-sql-user">Username</label>
+                    <input class="form-input" id="conn-backend-sql-user" autocomplete="off">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conn-backend-sql-password">Password</label>
+                    <input class="form-input" id="conn-backend-sql-password" type="password" autocomplete="new-password">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="conn-backend-sql-timeout">Timeout</label>
+                  <input class="form-input" id="conn-backend-sql-timeout" type="number" min="1" step="1" placeholder="30">
+                </div>
+              </div>
+
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+                <button class="btn btn-primary btn-sm" type="button" onclick="App.saveBackendConnectionForm()">Save Backend Connection</button>
+                <button class="btn btn-secondary btn-sm" type="button" onclick="App.testBackendConnectionForm()">Test Connection</button>
+                <button class="btn btn-ghost btn-sm" type="button" onclick="App.hideBackendConnectionForm()">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" id="conn-rag-group" style="display:none">
+        <div class="capability-panel">
+          <div class="settings-section-title">Evaluation Capabilities</div>
+          <label class="capability-option">
+            <input type="checkbox" id="conn-standard-eval-enabled" checked disabled>
+            <span>
+              <strong>Standard Chatbot Evaluation</strong>
+              <small>Conversation quality, task completion, and configured evaluation metrics.</small>
+            </span>
+          </label>
+          <label class="capability-option">
+            <input type="checkbox" id="conn-rag-enabled" onchange="App.onRagCapabilityChange()">
+            <span>
+              <strong>RAG / Knowledge Grounding Evaluation</strong>
+              <small>Use runtime retrieval evidence exposed by the agent. Scenario reference context remains configured separately in scenarios.</small>
+            </span>
+          </label>
+
+          <div id="conn-rag-config-panel" style="display:none">
+            <div class="form-group">
+              <label class="form-label" for="conn-rag-method">How can EvalForge access the retrieval evidence used by this agent?</label>
+              <select class="form-select" id="conn-rag-method" onchange="App.onRagMethodChange()">
+                <option value="same_response">Included in chatbot API response</option>
+                <option value="separate_api">Separate retrieval / trace API</option>
+                <option value="unavailable">Retrieval evidence unavailable</option>
+              </select>
+            </div>
+
+            <div id="conn-rag-unavailable-panel" class="alert alert-info" style="display:none">
+              <span>Standard chatbot evaluation will still run. Runtime RAG grounding metrics will not be evaluated because retrieval evidence is not available.</span>
+            </div>
+
+            <div id="conn-rag-rest-same-panel">
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-context-path">Where is the retrieved knowledge in the chatbot response? <span class="required">*</span></label>
+                <input class="form-input" id="conn-rag-context-path" placeholder="retrieved_chunks[*].content" autocomplete="off">
+                <div class="form-hint">Examples: <code>retrieved_chunks[*].content</code>, <code>sources[*].content</code>, <code>references[*].text</code>.</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-citation-path">Citation/source field/path</label>
+                <input class="form-input" id="conn-rag-citation-path" placeholder="sources[*]" autocomplete="off">
+              </div>
+            </div>
+
+            <div id="conn-rag-rest-separate-panel" style="display:none">
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-evidence-url">Evidence API URL <span class="required">*</span></label>
+                <input class="form-input" id="conn-rag-evidence-url" placeholder="https://client.example/evidence/{correlation_id}" autocomplete="off">
+                <div class="form-hint">Use <code>{correlation_id}</code> where the chatbot response correlation value should be inserted.</div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="conn-rag-evidence-method">Method</label>
+                  <select class="form-select" id="conn-rag-evidence-method" onchange="App.onRagEvidenceMethodChange()">
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="conn-rag-correlation-path">Correlation field in chatbot response <span class="required">*</span></label>
+                  <input class="form-input" id="conn-rag-correlation-path" placeholder="request_id" autocomplete="off">
+                  <div class="form-hint">Examples: <code>request_id</code>, <code>trace.id</code>, <code>metadata.request_id</code>.</div>
+                </div>
+              </div>
+              <div id="conn-rag-get-panel">
+                <div class="form-group">
+                  <label class="form-label" for="conn-rag-evidence-params">Query params JSON</label>
+                  <textarea class="form-textarea" id="conn-rag-evidence-params" placeholder='{"trace": "{correlation_id}"}'></textarea>
+                  <div class="form-hint">Optional. String values may include <code>{correlation_id}</code>.</div>
+                </div>
+              </div>
+              <div id="conn-rag-post-panel" style="display:none">
+                <div class="form-group">
+                  <label class="form-label" for="conn-rag-evidence-body">POST body JSON</label>
+                  <textarea class="form-textarea" id="conn-rag-evidence-body" placeholder='{"trace_id": "{correlation_id}"}'></textarea>
+                  <div class="form-hint">Optional. String values may include <code>{correlation_id}</code>.</div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-separate-context-path">Retrieved context field/path <span class="required">*</span></label>
+                <input class="form-input" id="conn-rag-separate-context-path" placeholder="retrieved_chunks[*].content" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-separate-citation-path">Citation/source field/path</label>
+                <input class="form-input" id="conn-rag-separate-citation-path" placeholder="retrieved_chunks[*]" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-evidence-auth-mode">Evidence API Authentication</label>
+                <select class="form-select" id="conn-rag-evidence-auth-mode" onchange="App.onRagEvidenceAuthChange()">
+                  <option value="same">Use chatbot connection authentication</option>
+                  <option value="none">No authentication</option>
+                  <option value="separate">Configure separately</option>
+                </select>
+              </div>
+              <div id="conn-rag-evidence-auth-panel" style="display:none">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="conn-rag-evidence-auth-type">Authentication Type</label>
+                    <select class="form-select" id="conn-rag-evidence-auth-type" onchange="App.onRagEvidenceAuthChange()">
+                      <option value="bearer">Bearer Token</option>
+                      <option value="api_key">API Key</option>
+                      <option value="headers">Custom Headers</option>
+                    </select>
+                  </div>
+                  <div class="form-group" id="conn-rag-evidence-auth-value-group">
+                    <label class="form-label" for="conn-rag-evidence-auth-value">Credential</label>
+                    <input class="form-input" id="conn-rag-evidence-auth-value" type="password" placeholder="env:EVIDENCE_TOKEN" autocomplete="new-password">
+                  </div>
+                </div>
+                <div class="form-group" id="conn-rag-evidence-header-name-group">
+                  <label class="form-label" for="conn-rag-evidence-header-name">API key header name</label>
+                  <input class="form-input" id="conn-rag-evidence-header-name" placeholder="x-api-key" autocomplete="off">
+                </div>
+                <div class="form-group" id="conn-rag-evidence-headers-group" style="display:none">
+                  <label class="form-label" for="conn-rag-evidence-headers">Custom headers JSON</label>
+                  <textarea class="form-textarea" id="conn-rag-evidence-headers" placeholder='{"X-Evidence-Key": "env:EVIDENCE_KEY"}'></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div id="conn-rag-browser-panel" style="display:none">
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-browser-context-selector">Visible evidence inside agent response</label>
+                <input class="form-input" id="conn-rag-browser-context-selector" placeholder=".sources .chunk" autocomplete="off">
+                <div class="form-hint">Context selector scoped to the current agent response only.</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-browser-citation-selector">Citation/source selector</label>
+                <input class="form-input" id="conn-rag-browser-citation-selector" placeholder=".sources a" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-browser-expand-selector">Optional expand selector</label>
+                <input class="form-input" id="conn-rag-browser-expand-selector" placeholder="button:has-text('Sources')" autocomplete="off">
+              </div>
+            </div>
+
+            <div id="conn-rag-websocket-panel" style="display:none">
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-ws-context-path">Where is the retrieved knowledge in the final WebSocket response? <span class="required">*</span></label>
+                <input class="form-input" id="conn-rag-ws-context-path" placeholder="retrieved_chunks[*].content" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="conn-rag-ws-citation-path">Citation/source field/path</label>
+                <input class="form-input" id="conn-rag-ws-citation-path" placeholder="sources[*]" autocomplete="off">
+              </div>
+              <div class="form-hint">WebSocket currently supports evidence included in the final response payload only.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-test-conn" onclick="App.testNewConnection()">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Test Connection
+      </button>
+      <button class="btn btn-primary" id="btn-save-conn" onclick="App.saveConnection()">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        Save Connection
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     RUN EVALUATION MODAL
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-run-eval" role="dialog" aria-modal="true" aria-labelledby="modal-run-eval-title">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-run-eval-title">Run Evaluation</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeModal('modal-run-eval')" aria-label="Close modal">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-eval-alert"></div>
+
+      <!-- Agent info summary -->
+      <div class="agent-info-box">
+        <div class="label">Selected Agent</div>
+        <div class="name" id="eval-agent-info">—</div>
+        <div class="meta" id="eval-agent-meta">—</div>
+      </div>
+
+      <!-- Scenario selector -->
+      <div class="form-group">
+        <label class="form-label" for="eval-scenario-select">Scenario <span class="required">*</span></label>
+        <select class="form-select" id="eval-scenario-select" aria-describedby="eval-scenario-hint">
+          <option value="">Loading scenarios…</option>
+        </select>
+        <div class="form-hint" id="eval-scenario-hint"></div>
+      </div>
+
+      <!-- Custom path (shown when "Custom path..." is selected) -->
+      <div id="eval-custom-path-group" style="display:none" class="form-group">
+        <label class="form-label" for="eval-custom-path">Custom Scenario Path</label>
+        <input class="form-input" id="eval-custom-path" placeholder="scenarios/my_scenario.yaml" autocomplete="off">
+        <div class="form-hint">Relative path from the project root to the YAML scenario file.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="App.closeModal('modal-run-eval')">Cancel</button>
+      <button class="btn btn-primary" id="btn-run-eval" onclick="App.runEvaluation()">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Run Evaluation
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     REAL-TIME INTERACTION MODAL
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-interaction" role="dialog" aria-modal="true" aria-labelledby="modal-interaction-title">
+  <div class="modal" style="max-width: 560px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-interaction-title">Image Required</span>
+    </div>
+    <div class="modal-body">
+      <div id="modal-interaction-alert"></div>
+      <p class="form-hint" id="interaction-subtitle">Choose how you want to provide the image.</p>
+      <div id="interaction-choice-panel" class="interaction-choice-panel">
+        <button class="btn btn-secondary" id="btn-interaction-test-image">Upload Test Image</button>
+        <button class="btn btn-secondary" id="btn-interaction-device">Upload From Device</button>
+        <button class="btn btn-secondary" id="btn-interaction-camera">Capture Live Photo</button>
+      </div>
+      <form id="interaction-form-panel" class="interaction-form-panel" style="display:none" novalidate>
+        <div id="interaction-form-fields"></div>
+      </form>
+      <div id="interaction-otp-panel" class="interaction-otp-panel" style="display:none">
+        <div class="form-group">
+          <label class="form-label" for="interaction-otp-input">OTP <span class="required">*</span></label>
+          <input class="form-input" id="interaction-otp-input" type="password" autocomplete="one-time-code" inputmode="numeric">
+          <div class="form-hint" id="interaction-otp-hint"></div>
+          <div class="form-error" id="interaction-otp-error"></div>
+        </div>
+      </div>
+      <input type="file" id="interaction-file-input" accept="image/*" style="display:none">
+      <div id="interaction-camera-panel" class="interaction-camera-panel" style="display:none">
+        <video id="interaction-camera-video" autoplay playsinline muted></video>
+        <canvas id="interaction-camera-canvas" style="display:none"></canvas>
+        <img id="interaction-camera-preview" alt="Captured preview" style="display:none">
+        <div class="interaction-camera-actions">
+          <button class="btn btn-secondary" id="btn-camera-capture">Capture</button>
+          <button class="btn btn-secondary" id="btn-camera-retake" style="display:none">Retake</button>
+          <button class="btn btn-primary" id="btn-camera-use" style="display:none">Use Photo</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" id="btn-interaction-submit-form" style="display:none">Submit</button>
+      <button class="btn btn-primary" id="btn-interaction-submit-otp" style="display:none">Submit</button>
+      <button class="btn btn-secondary" id="btn-interaction-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-media-preview" role="dialog" aria-modal="true" aria-labelledby="modal-media-preview-title">
+  <div class="modal" style="max-width: 820px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-media-preview-title">Preview</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeModal('modal-media-preview')" aria-label="Close preview">Close</button>
+    </div>
+    <div class="modal-body">
+      <div id="media-preview-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     PASTE SCENARIO MODAL
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-paste-scenario" role="dialog" aria-modal="true" aria-labelledby="modal-scenario-title">
+  <div class="modal" style="max-width: 600px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-scenario-title">Paste Scenario</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeModal('modal-paste-scenario')" aria-label="Close modal">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-scenario-alert"></div>
+
+      <div class="form-group">
+        <label class="form-label" for="scenario-filename">Scenario Filename <span class="required">*</span></label>
+        <input class="form-input" id="scenario-filename" placeholder="e.g. gemini_customer_refund.yaml" autocomplete="off">
+        <div class="form-hint">Must end with .yaml or .yml</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="scenario-yaml">Scenario YAML <span class="required">*</span></label>
+        <textarea class="form-textarea" id="scenario-yaml" style="height: 300px; font-family: monospace;" placeholder="scenario_id: my_scenario&#10;agent:&#10;..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-validate-scenario" onclick="App.validateScenario()">Validate</button>
+      <button class="btn btn-primary" id="btn-save-scenario" onclick="App.saveScenario()">Save Scenario</button>
+    </div>
+  </div>
+</div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     DELETE EVALUATION CONFIRMATION
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+<div class="modal-overlay" id="modal-delete-evaluation" role="dialog" aria-modal="true" aria-labelledby="modal-delete-evaluation-title">
+  <div class="modal" style="max-width: 520px;">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-delete-evaluation-title">Delete Evaluation?</span>
+      <button class="btn btn-ghost btn-sm" onclick="App.closeDeleteEvaluationModal()" aria-label="Close delete confirmation">Close</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-delete-evaluation-alert"></div>
+      <dl class="delete-evaluation-summary">
+        <dt>Scenario</dt><dd id="delete-evaluation-scenario">N/A</dd>
+        <dt>Evaluation</dt><dd id="delete-evaluation-id">N/A</dd>
+        <dt>Date</dt><dd id="delete-evaluation-date">N/A</dd>
+        <dt>Outcome</dt><dd id="delete-evaluation-outcome">N/A</dd>
+      </dl>
+      <p class="delete-evaluation-warning">This will permanently delete this evaluation and its stored results. This action cannot be undone.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="App.closeDeleteEvaluationModal()">Cancel</button>
+      <button class="btn btn-danger" id="btn-confirm-delete-evaluation" onclick="App.confirmDeleteEvaluation()">Delete Evaluation</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notifications -->
+<div class="toast-container" id="toast-container" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

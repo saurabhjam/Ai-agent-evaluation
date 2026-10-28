@@ -57,6 +57,7 @@ logs/
 # Generated Images / Dumps
 # =========================
 *.html
+!frontend/index.html
 *.png
 trace*.txt
 connection_dump.json
